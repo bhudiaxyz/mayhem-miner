@@ -7,6 +7,8 @@ The game is a homage to the early-1980s single-screen platformers, chiefly Matth
 ## Highlights
 
 - **Twenty hand-built caverns**, each one screen in size, each with its own name, layout and look: its own colours, rock, back wall (stone, rubble, marble, mud and more), cave features and drifting dust, spores, embers or drips. Generated caverns get their own seeded looks too.
+- **A gentle start, a long climb**: difficulty rises in bands of ten caverns, from "Very easy" to "Mayhem" at cavern 100. Guardians speed up, air gets tighter, and generated caverns gain more crumbling ledges, belts, spikes and guardians. Fliers join at cavern 31 and sprinting guardians at 41.
+- **New creatures as you go down**: slimes, beetles, bats and drones at first, then moles from cavern 11, mine robots and silk-hanging spiders from 21, worms from 31 and moths from 41. Each cavern paints its creatures in its own palette. How to play has an animated "Who's down here" guide to all of them.
 - **Endless generated caverns** after the twentieth. A procedural generator builds each one and a built-in solver proves every crystal and the portal can be reached before you see it.
 - **Air is the clock**: the tank drains steadily, and whatever is left when you reach the portal is paid out as bonus points.
 - **Classic platforming rules**: a fixed-arc jump you commit to, one-way ledges you jump up through, and falls that kill if they're too long.

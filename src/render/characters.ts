@@ -147,7 +147,9 @@ function part(boxes: Box[], offset: number[], at: number[], extra: THREE.MeshSta
 /** Ease rotation / position channels toward a target; k is the frame's blend (0 = frozen, 1 = snap). */
 const to = (v: THREE.Vector3 | THREE.Euler, axis: "x" | "y" | "z", target: number, k: number) =>
     (v[axis] += (target - v[axis]) * k);
-const blend = (dt: number, rate: number) => 1 - Math.exp(-dt * rate);
+/** Frame blend toward a target at `rate` per second; a negative dt (rAF timestamps can predate a
+ * performance.now() read) must not overshoot, so it counts as no time. */
+const blend = (dt: number, rate: number) => 1 - Math.exp(-Math.max(0, dt) * rate);
 const shade = (c: number, k: number) => new THREE.Color(c).multiplyScalar(k).getHex();
 
 // ---- Miner ----------------------------------------------------------------------------------------

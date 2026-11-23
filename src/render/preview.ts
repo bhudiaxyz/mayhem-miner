@@ -44,8 +44,8 @@ export function animatePreviews(root: HTMLElement): () => void {
     key.position.set(3, 5, 4);
     scene.add(key);
     const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
-    camera.position.set(1.4, 1.5, 4.6);
-    camera.lookAt(0, 0.95, 0);
+    camera.position.set(1.5, 1.6, 5.2);
+    camera.lookAt(0, 1, 0);
 
     const models = new Map<string, Character>();
     const modelFor = (id: string) => {
@@ -66,7 +66,7 @@ export function animatePreviews(root: HTMLElement): () => void {
         last = performance.now(),
         t = 0;
     const frame = (now: number) => {
-        const dt = still ? 0 : Math.min(0.05, (now - last) / 1000);
+        const dt = still ? 0 : Math.max(0, Math.min(0.05, (now - last) / 1000));
         last = now;
         t += dt;
         for (const cv of canvases) {

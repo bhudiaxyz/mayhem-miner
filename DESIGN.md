@@ -57,6 +57,7 @@ src/
   styles.css            theme variables, responsive layout (strip / gutters), HUD, touch, menus, dialogs
   core/
     game.ts             rules: cavern state, air, crystals, guardians, lives, score, phases (pure)
+    difficulty.ts       the difficulty curve: bands of ten, every per-cavern knob (pure)
     physics.ts          miner movement: walk, jump table, fall, landing, overlap tests (pure)
     palette.ts          every colour: a theme per cavern (+ seeded ones), sprite colours, UI colours
     random.ts           the shared seeded PRNG, mulberry32 (pure)
@@ -71,6 +72,7 @@ src/
     view.ts             three.js scene: voxel cavern, crystals, portal, lights, post-FX
     characters.ts       voxel miner + guardians: part builder, joints, poses, helmet torch
     paint.ts            procedural canvas textures: rock tiles and the layered back wall
+    preview.ts          animated character turntable for How to play (one small renderer)
     tier.ts             GPU classification + per-tier quality table
   fx/
     effects.ts          pooled additive sparks, voxel pickup halos, ambient motes
@@ -224,17 +226,41 @@ for attempt = 0, 1, 2 …:
     accept if ≥ 5 crystals remain
 ```
 
-`build()` lays the cavern out in this order, with `depth = n − 20` and `hard = min(1, depth / 30)` scaling the odds:
+### 7.1 The difficulty curve (`core/difficulty.ts`)
 
-1. **Ledge bands** on rows 12, 9, 6 and 3 (three rows apart: exactly one jump). Each band is a run of segments 3–8 cells long separated by 2–4 cell gaps. A segment is a crumbling ledge (12% → 32% with depth), a conveyor (≈18%), rock (6%) or a plain ledge.
+Like thrust-force, `difficulty(n)` returns every per-cavern knob, climbing in **bands of 10 caverns** (`BAND`) up to **cavern 100** (`MAX_DIFFICULTY_AT`) and holding there. With `band = ⌊n / 10⌋` and `within = (n mod 10) / 9`, progress is `t = (band + 0.2·within) / 9.2`: inside a band difficulty creeps up only 20% of a band step, and each new band is a clear step up. Each knob is a blend `a + (b − a)·t`:
+
+| Knob            | Cavern 1     | Cavern 100 | Applies to  | Effect                               |
+| --------------- | ------------ | ---------- | ----------- | ------------------------------------ |
+| `guardianSpeed` | 0.5          | 1.15       | all caverns | guardian px/tick                     |
+| `airBonus`      | +15 s        | 0          | hand-built  | band 1's cushion (very easy start)   |
+| `air`           | 66 s         | 40 s       | generated   | seconds of air                       |
+| `crystals`      | 5            | 12         | generated   | crystals wanted (+0–1)               |
+| `walkers`       | 1            | 5          | generated   | ledge walkers                        |
+| `lifts`         | 0            | 3          | generated   | lift attempts                        |
+| `fliers`        | 0 (until 31) | 1 → 3      | generated   | fliers mid-cavern                    |
+| `sprinters`     | 0 (until 41) | 1 → 3      | generated   | guardians at `SPRINT` (1.5×) speed   |
+| `crumble`       | 6%           | 40%        | generated   | chance a segment crumbles            |
+| `conveyor`      | 10%          | 24%        | generated   | chance a segment is a belt           |
+| `floorSpikes`   | 1            | 7          | generated   | floor spike attempts                 |
+| `ledgeSpikes`   | 15%          | 55%        | generated   | spike on a long ledge                |
+| `pillars`       | 0            | 4          | generated   | hanging rock pillars (50–100% of it) |
+
+Bands 1–2 are the hand-built caverns, whose authored layouts already rise in complexity. The curve makes band 1 very easy (slow guardians, 15 s of extra air) and steps band 2 up. Generated caverns start in band 3. **New mechanics arrive at the start of a band**, so each is met on its own: fliers in generated caverns from 31 (band 4) and sprinting guardians from 41 (band 5). **New creatures** arrive by band too (§9.3). The intro card names the band: Very easy, Easy, Steady, Tricky, Hard, Harder, Very hard, Brutal, Fiendish, Mayhem (`BAND_NAMES`). `check.ts` asserts no knob ever eases from one cavern to the next, the curve saturates at 100, band 1 stays gentle, each band is a clear step up, and fliers and sprinters never appear early (§16).
+
+### 7.2 Layout
+
+`build()` lays the cavern out in this order, with the knobs above:
+
+1. **Ledge bands** on rows 12, 9, 6 and 3 (three rows apart: exactly one jump). Each band is a run of segments 3–8 cells long separated by 2–4 cell gaps. A segment is a crumbling ledge (`crumble`), a conveyor (`conveyor`), rock (6%) or a plain ledge.
 2. **Start** in a randomly chosen bottom corner (column 1 or 28). Later steps keep spikes and lifts at least four columns away from it.
-3. **Pillars**: up to two three-row rock columns hanging under random upper segments, which block walking and force new routes.
-4. **Spikes**: 1 to 3–5 on the floor, and on the middle of long plain ledges (25% → 50%).
+3. **Pillars**: `pillars` three-row rock columns hanging under random upper segments, which block walking and force new routes.
+4. **Spikes**: `floorSpikes` on the floor, and on the middle of long plain ledges (`ledgeSpikes`).
 5. **Portal**: candidate spots are any 2 × 2 of air resting on a non-crumbling segment, or floor spots more than 12 columns from the start. One is chosen among those more than 14 cells (Manhattan) from the start.
-6. **Crystals**: 6–8 rising to 6–11, each on a cell just above a segment (sometimes one cell higher, which needs a jump), at least three cells from any other crystal in the same row and never inside the portal.
-7. **Guardians**: walkers on segments of five or more cells (more with depth, up to four), up to two lifts in open columns, and from `hard > 0.2` a 50% chance of a flier on rows 6–7.
+6. **Crystals**: `crystals` (+0–1), each on a cell just above a segment (sometimes one cell higher, which needs a jump), at least three cells from any other crystal in the same row and never inside the portal.
+7. **Guardians**: `walkers` on segments of five or more cells, `lifts` in open columns, and `fliers` on rows 6–8 (from 31). Then `sprinters` of them (from 41, seeded) get `speed = SPRINT`.
 
-Names come from the same seeded stream: an adjective and a mining noun, for example "Sunken Winze" or "Copper Heading". Air drops from 60 s to 45 s over the first 30 generated caverns. Results are memoised per `n`, so restarts and the cavern select list are free. Generating caverns 20–59 takes about 0.6 s in total under Node, roughly 15 ms each including retries, so a fresh cavern costs a fraction of a frame budget at load.
+Names come from the same seeded stream: an adjective and a mining noun, for example "Sunken Winze" or "Copper Heading". Air follows `air`. Results are memoised per `n`, so restarts and the cavern select list are free. Generating caverns 20–109 takes about 1.3 s in total under Node, roughly 15 ms each including retries, so a fresh cavern costs a fraction of a frame budget at load.
 
 ## 8. Game rules (`core/game.ts`)
 
@@ -254,7 +280,7 @@ Guardians keep moving in every phase, so the cavern stays alive behind dialogs. 
 1. **Air** drops by one tick; at zero, die.
 2. **Movement**: `stepBody()`; a `"dead"` result dies; `jump` and `land` become events. `walk` accumulates pixels walked (it drives the leg animation).
 3. **Crumbling**: while grounded on `~`, each `~` cell under the feet gains one tick of `wear`. At `CRUMBLE_TICKS` (28 ticks, 0.7 s) it becomes air and a `crumble` event fires.
-4. **Guardians** patrol: `x` (walk, fly) or `y` (lift) moves by `guardianSpeed` px/tick and reverses at `min` / `max`. Speed is `0.6 + 0.012 · min(n, 40)` px/tick (24 px/s at cavern 1, about 43 px/s from cavern 40).
+4. **Guardians** patrol: `x` (walk, fly) or `y` (lift) moves by `guardianSpeed` px/tick and reverses at `min` / `max`. Speed is `difficulty(n).guardianSpeed` px/tick (0.5 at cavern 1, 20 px/s, rising band by band to 1.15, 46 px/s, at cavern 100), times the guardian's `speed` (1.5 for sprinters).
 5. **Hazards**: spikes, then guardians: die.
 6. **Crystals**: each one touched scores 100 and fires `crystal`, or `open` if it was the last.
 7. **Levers**: the first touch opens every door (`D` → air) and fires `lever`.
@@ -296,20 +322,26 @@ Every character lives in `render/characters.ts` and is **built from voxel cubes*
 
 All characters face +x with their feet at the origin. The miner, guardians and crystals are drawn at **`SPRITE` = 75%** of their size, scaled from the feet, so they sit comfortably inside their 1 × 2 cell box. Movement still uses the full 8 × 16 px box against rock (so cavern clearances, and the solver's proofs, are unchanged), but every _touch_ test (spikes, guardians, crystals, levers, the portal) uses the shrunken box: `HIT_TOP` (4 px) trims the top of the miner's, and the guardian box starts 5 px down, so what you see touching is what kills.
 
-| Model  | Used for                   | Joints and animation                                                                       |
-| ------ | -------------------------- | ------------------------------------------------------------------------------------------ |
-| miner  | the player                 | legs, arms, torso, head. Walk swing + bob + lean; idle breathe + look; tuck; flail; squash |
-| robot  | walkers, caverns n % 3 = 0 | stiff legs and arms swing, torso bobs, visor head scans                                    |
-| beetle | walkers, caverns n % 3 = 1 | six legs in a tripod gait, shell bobs                                                      |
-| slime  | walkers, caverns n % 3 = 2 | hops along, squashing and stretching (translucent)                                         |
-| bat    | fliers                     | wings flap from the shoulders, body bobs                                                   |
-| drone  | lifts                      | rotor spins, core bobs and sways, thruster glows                                           |
+| Model      | Kind | From cavern | Joints and animation                                                                       |
+| ---------- | ---- | ----------- | ------------------------------------------------------------------------------------------ |
+| miner      | you  | —           | legs, arms, torso, head. Walk swing + bob + lean; idle breathe + look; tuck; flail; squash |
+| slime      | walk | 1           | hops along, squashing and stretching (translucent); darker base, lighter crown             |
+| beetle     | walk | 1           | six legs in a tripod gait, shell bobs; dark legs, mid head, lit shell ridge                |
+| bat        | fly  | 1           | wings flap from the shoulders, body bobs; ears, pale belly                                 |
+| drone      | lift | 1           | rotor spins, core bobs and sways, thruster glows                                           |
+| mole       | walk | 11          | big front claws paddle, hind feet push, body rolls; pink glowing snout                     |
+| mine robot | walk | 21          | stiff legs and arms swing, torso bobs, visor head scans                                    |
+| spider     | lift | 21          | hangs on a silk thread up to the top of its range (`PoseState.reach`); legs splay, twitch  |
+| worm       | walk | 31          | ringed segments inch along in a wave, rearing toward the head                              |
+| moth       | fly  | 41          | wings flap through a raised V (readable side-on), body bobs                                |
+
+`CREATURES` (end of characters.ts) is the roster: each entry has its kind, the band it arrives in, the Help text and a preview colour. `guardianModel(kind, n, colour)` picks from the creatures of that kind its band allows, newest first, so a band's newcomer is the one most often met. Every creature uses at least three tones of its colour (light, mid, dark) so its body parts read apart.
 
 **The helmet torch.** The miner's helmet carries a steel housing with a glowing lens. A soft additive cone (vertex-faded, no texture) shines from it, and a `SpotLight` kept in the scene (never hidden, so shaders never recompile) is aimed each frame from the lens toward a point ahead of the head, so it follows bob, lean and look. Two independent knobs set the strength: `MINER_GLOW` (view.ts) for the warm halo point light around the miner, and `TORCH_GLOW` (characters.ts) for the spotlight, beam and lens. Both fade through a death and gutter on low air. Crystals glow at `CRYSTAL_GLOW` (view.ts).
 
 **Crystal pickup halo.** `Effects.halo()` adds a blocky halo: two rings of glowing cubes (16 outer, 8 inner a beat later) snapped to the voxel grid so they read as pixel-art circles. They burst outward, shrinking and spinning as they fade over 0.6 s, with a flash of point light in the crystal's colour. It is one `InstancedMesh` shared by up to four halos.
 
-Guardian colours are an HSL hue stepped by cavern (`n · 0.137`), offset per guardian kind. Facing is a rotation of ±0.45 rad off side-on, so the models read as 3D. Turns ease between the two angles through facing the camera rather than snapping.
+**Creature colours** are a palette per cavern, seeded by its name: a hue family set opposite the back wall's hue (+0.35 to +0.65 round the wheel), so creatures always stand out, with a cavern-wide saturation and lightness. Kinds sit apart in hue (fliers +0.14, lifts −0.14), and each creature gets its own slight shade. HSL is read as sRGB. Patrol zones use the same colour at 7% opacity. Facing is a rotation of ±0.45 rad off side-on, so the models read as 3D. Turns ease between the two angles through facing the camera rather than snapping.
 
 ### 9.4 Per-frame posing (`sync`)
 
@@ -339,7 +371,7 @@ Plain DOM over the canvas, styled by `styles.css`. Everything is ordinary button
 
 - **Splash** (`#boot`, after thrust-force's, rethemed): a dark cavern with drifting copper bars and twinkling crystal glints; an emblem of the portal arch on a glowing ledge with a crystal bobbing and shimmering inside it and air bubbles rising; the title, a crystal-studded rule and the tagline. Below them the **air gauge** is the loading bar: it fills one boot stage at a time while the tip line names the stage (§15.1), so slow and older devices show steady progress rather than a frozen page. Inline critical CSS in `index.html` keeps the page dark and the dialogs hidden in the moment before `styles.css` (which loads with the JS) arrives.
 - **Main menu**: once booted (`#boot.ready`) the gauge gives way to the menu and the splash turns translucent over the live attract cavern: **Continue** (the deepest cavern reached, fresh lives and score), **New game** (How to play first on the first run), **Cavern select** (every cavern reached so far, by name), **How to play**, **Sound**. On short screens the emblem and tagline hide and the menu wraps into two columns, so every item stays on screen (the smoke test asserts this).
-- **Sheets** (`#sheet`, `ui/menu.ts` `showSheet`): one modal dialog for cavern select and How to play, with the device's bindings. The CSS is shared with the pause dialog through `:is(#pause, #sheet)`.
+- **Sheets** (`#sheet`, `ui/menu.ts` `showSheet`): one modal dialog for cavern select and How to play, with the device's bindings. How to play has a **Who's down here** carousel: one animated character at a time (Pip first, then each creature in arrival order), with ◀ ▶ buttons, its kind, the cavern it first appears in, what makes it distinct and what to watch for, and a counter. `render/preview.ts` animates it with one small WebGL renderer that exists only while the sheet is open; it reads the canvas's `data-creature` each frame and caches each model on first view. The CSS is shared with the pause dialog through `:is(#pause, #sheet)`.
 - **Cavern intro card** (`#intro`): for 2.4 s on each cavern load, the number ("Cavern 7 of 20", or "· uncharted" for generated ones), the name, crystal count, air and features (crumbling ledges, conveyors, a lever).
 - **HUD** (`ui/hud.ts`): the cavern name at the top; air bar, score, best, crystals left and lives at the bottom. The air bar blinks red under 20%. It writes to the DOM **only when a value changes**, because identical writes still trigger style recalculation, which shows up as jank on phones. A fading message line announces the portal opening, doors and extra lives.
 - **Pause and game over** (`#pause`): Resume (Esc), Restart cavern (R), Sound (M), Main menu (Q), with the device's bindings. As the **game-over** card (`data-kind="over"`) it shows score, best and the cavern reached, with **Play again** from the same starting cavern.
@@ -466,7 +498,7 @@ Then the gauge reads full ("Ready"), the loop starts and the main menu shows. An
     2. Generated caverns 20–59 are produced, have at least five crystals, solve, and round-trip through the parser.
     3. Movement: a standing jump rises exactly 26 px and lands where it started; a belt carries you and walking against it holds still; a six-cell drop is survived and an eight-cell drop kills.
     4. Rules, on small lab caverns: crystals score and the last one opens the portal; the portal completes the cavern, air is paid out as bonus and the next cavern loads; crumbling ledges give way; levers open doors; spikes, guardians and running out of air kill; deaths spend lives and the last one ends the game; an extra life arrives at 10,000.
-- **`python scripts/smoke.py [out_dir]`**: Playwright (Chromium on SwiftShader) against `npm run preview` at `?tier=low`, on a 1280 × 720 desktop, a 412 × 860 portrait touch phone and an 860 × 412 landscape touch phone. Each run boots to the menu with every item on screen, starts a new game, walks (keyboard or the ▶ touch button, checking it releases), jumps (desktop), pauses and resumes, with no page errors. Screenshots go to `shots/` (git-ignored). Software GL is slow, so the checks poll `window.__game` instead of sleeping.
+- **`python scripts/smoke.py [out_dir]`**: Playwright (Chromium on SwiftShader) against `npm run preview` at `?tier=low`, on a 1280 × 720 desktop, a 412 × 860 portrait touch phone and an 860 × 412 landscape touch phone. Each run boots to the menu with every item on screen, starts a new game, walks (keyboard, or by dragging the touch joystick; the jump button presses and releases), jumps (desktop), pauses and resumes, with no page errors. Screenshots go to `shots/` (git-ignored). Software GL is slow, so the checks poll `window.__game` instead of sleeping.
 - **`npm run typecheck`** and **`npm run format`** (Prettier with the repo's `.prettierrc`).
 
 ## 17. Build and deployment
@@ -487,37 +519,39 @@ npm run preview    # serve dist/ (then: python scripts/smoke.py)
 
 ## 18. Tuning reference
 
-| Constant              | Where                  | Value                              | Effect                                    |
-| --------------------- | ---------------------- | ---------------------------------- | ----------------------------------------- |
-| `TICK`                | `core/physics.ts`      | 1/40 s                             | simulation rate                           |
-| walk speed            | `stepBody`             | 1 px/tick (5 cells/s)              | also conveyor speed                       |
-| `JUMP`                | `core/physics.ts`      | 24 ticks, 26 px high               | jump height, length and timing            |
-| `FALL_SPEED`          | `core/physics.ts`      | 4 px/tick                          | straight fall speed                       |
-| `FALL_LIMIT`          | `core/physics.ts`      | 48 px (6 cells)                    | longest survivable fall, from the apex    |
-| `CRUMBLE_TICKS`       | `core/game.ts`         | 28 ticks (0.7 s)                   | how long a crumbling cell holds you       |
-| `guardianSpeed`       | `core/game.ts`         | 0.6 + 0.012 · min(n, 40)           | guardian px/tick                          |
-| air                   | `parse`, `generate`    | 75 − n s; 60 → 45 s                | hand-built; generated                     |
-| `CRYSTAL_POINTS`      | `core/game.ts`         | 100                                | per crystal                               |
-| `AIR_POINTS`          | `core/game.ts`         | 20                                 | per second of air left                    |
-| `EXTRA_LIFE`          | `core/game.ts`         | 10,000                             | points per extra life                     |
-| `START_LIVES`         | `core/game.ts`         | 3                                  | lives per run                             |
-| `DEAD_PAUSE`          | `core/game.ts`         | 1.6 s                              | before the cavern restarts                |
-| `TUMBLE`              | `render/view.ts`       | 0.8 s                              | death tumble before the miner vanishes    |
-| jump buffer           | `player/input.ts`      | 100 ms                             | early jump taps still count on landing    |
-| `BANDS`               | `world/generate.ts`    | rows 12, 9, 6, 3                   | generated ledge bands (one jump apart)    |
-| `ATTRACT_SECONDS`     | `main.ts`              | 6 s                                | title-screen cavern cycle                 |
-| bloom                 | `render/view.ts`       | `BLOOM_STRENGTH` 0.45 / 0.4 / 0.85 | strength / radius / threshold             |
-| `EDGE_GLOW`           | `render/view.ts`       | 1.05                               | ledge edge strip HDR strength             |
-| `CRYSTAL_GLOW`        | `render/view.ts`       | 2.4 × 0.85                         | crystal HDR strength                      |
-| `MINER_GLOW`          | `render/view.ts`       | 0.75                               | warm halo light around the miner          |
-| `TORCH_GLOW`          | `render/characters.ts` | 1                                  | helmet torch: spotlight, beam and lens    |
-| `BACKDROP_BRIGHTNESS` | `render/view.ts`       | 0.45                               | back wall brightness                      |
-| `BACKDROP_GLOW`       | `render/view.ts`       | 0.35                               | glowworms / veins on the back wall        |
-| `BACKDROP_DETAIL`     | `render/paint.ts`      | 0.45                               | strength of back-wall rock and features   |
-| `BACKDROP_SATURATION` | `render/paint.ts`      | 0.65                               | back-wall gradient saturation             |
-| `FOV`                 | `render/view.ts`       | 30°                                | camera field of view                      |
-| `SPRITE`              | `render/view.ts`       | 0.75                               | drawn size of miner, guardians, crystals  |
-| `HIT_TOP`             | `core/physics.ts`      | 4 px                               | touch hitbox trimmed to match the sprites |
+| Constant                     | Where                  | Value                              | Effect                                     |
+| ---------------------------- | ---------------------- | ---------------------------------- | ------------------------------------------ |
+| `TICK`                       | `core/physics.ts`      | 1/40 s                             | simulation rate                            |
+| walk speed                   | `stepBody`             | 1 px/tick (5 cells/s)              | also conveyor speed                        |
+| `JUMP`                       | `core/physics.ts`      | 24 ticks, 26 px high               | jump height, length and timing             |
+| `FALL_SPEED`                 | `core/physics.ts`      | 4 px/tick                          | straight fall speed                        |
+| `FALL_LIMIT`                 | `core/physics.ts`      | 48 px (6 cells)                    | longest survivable fall, from the apex     |
+| `CRUMBLE_TICKS`              | `core/game.ts`         | 28 ticks (0.7 s)                   | how long a crumbling cell holds you        |
+| `guardianSpeed`              | `core/difficulty.ts`   | 0.5 → 1.15 (bands of 10, to 100)   | guardian px/tick                           |
+| air                          | `parse`, `difficulty`  | 75 − n (+15 in band 1); 66 → 40 s  | hand-built; generated                      |
+| `BAND` / `MAX_DIFFICULTY_AT` | `core/difficulty.ts`   | 10 / 100                           | caverns per band; where the curve tops out |
+| `SPRINT`                     | `core/difficulty.ts`   | 1.5                                | sprinter speed multiplier (from 41)        |
+| `CRYSTAL_POINTS`             | `core/game.ts`         | 100                                | per crystal                                |
+| `AIR_POINTS`                 | `core/game.ts`         | 20                                 | per second of air left                     |
+| `EXTRA_LIFE`                 | `core/game.ts`         | 10,000                             | points per extra life                      |
+| `START_LIVES`                | `core/game.ts`         | 3                                  | lives per run                              |
+| `DEAD_PAUSE`                 | `core/game.ts`         | 1.6 s                              | before the cavern restarts                 |
+| `TUMBLE`                     | `render/view.ts`       | 0.8 s                              | death tumble before the miner vanishes     |
+| jump buffer                  | `player/input.ts`      | 100 ms                             | early jump taps still count on landing     |
+| `BANDS`                      | `world/generate.ts`    | rows 12, 9, 6, 3                   | generated ledge bands (one jump apart)     |
+| `ATTRACT_SECONDS`            | `main.ts`              | 6 s                                | title-screen cavern cycle                  |
+| bloom                        | `render/view.ts`       | `BLOOM_STRENGTH` 0.45 / 0.4 / 0.85 | strength / radius / threshold              |
+| `EDGE_GLOW`                  | `render/view.ts`       | 1.05                               | ledge edge strip HDR strength              |
+| `CRYSTAL_GLOW`               | `render/view.ts`       | 2.4 × 0.85                         | crystal HDR strength                       |
+| `MINER_GLOW`                 | `render/view.ts`       | 0.75                               | warm halo light around the miner           |
+| `TORCH_GLOW`                 | `render/characters.ts` | 1                                  | helmet torch: spotlight, beam and lens     |
+| `BACKDROP_BRIGHTNESS`        | `render/view.ts`       | 0.45                               | back wall brightness                       |
+| `BACKDROP_GLOW`              | `render/view.ts`       | 0.35                               | glowworms / veins on the back wall         |
+| `BACKDROP_DETAIL`            | `render/paint.ts`      | 0.45                               | strength of back-wall rock and features    |
+| `BACKDROP_SATURATION`        | `render/paint.ts`      | 0.65                               | back-wall gradient saturation              |
+| `FOV`                        | `render/view.ts`       | 30°                                | camera field of view                       |
+| `SPRITE`                     | `render/view.ts`       | 0.75                               | drawn size of miner, guardians, crystals   |
+| `HIT_TOP`                    | `core/physics.ts`      | 4 px                               | touch hitbox trimmed to match the sprites  |
 
 ## 19. Known limits and extension points
 
