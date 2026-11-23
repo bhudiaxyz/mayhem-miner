@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en" style="background: #07050d">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <meta
+            name="description"
+            content="Single-screen cavern platformer. Grab every crystal before the air runs out, then reach the portal."
+        />
+        <title>Mayhem Miner</title>
+        <meta name="theme-color" content="#07050d" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="Mayhem Miner" />
+        <meta
+            property="og:description"
+            content="Twenty hand-built caverns, then endless generated ones. Grab every crystal before the air runs out."
+        />
+        <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@400;600&display=swap"
+            rel="stylesheet"
+        />
+        <!-- Before styles.css arrives (it loads with the JS): a dark page, a centred splash, no dialogs. -->
+        <style>
+            body {
+                margin: 0;
+                color: #f2ecff;
+                font-family: system-ui, sans-serif;
+                text-align: center;
+            }
+            #pause,
+            #sheet,
+            #touch,
+            .ls-menu {
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="app"></div>
+
+        <div id="hud" hidden>
+            <div class="h-top"><span id="h-name"></span></div>
+            <div class="h-bottom">
+                <label class="h-air"
+                    >Air<span class="bar"><span id="h-air"></span></span
+                ></label>
+                <div><span class="h-label">Score</span><span id="h-score">0</span></div>
+                <div><span class="h-label">Best</span><span id="h-best">0</span></div>
+                <div id="h-crystals" aria-label="Crystals left"></div>
+                <div id="h-lives" aria-label="Lives left"></div>
+            </div>
+            <div id="h-msg" role="status" aria-live="polite"></div>
+        </div>
+
+        <div id="touch">
+            <button data-k="left" aria-label="Walk left">◀</button>
+            <button data-k="right" aria-label="Walk right">▶</button>
+            <span class="t-gap"></span>
+            <button data-k="jump" aria-label="Jump">▲</button>
+            <button id="t-pause" aria-label="Pause">❚❚</button>
+        </div>
+
+        <div id="boot">
+            <div class="ls-bg" aria-hidden="true"><div class="ls-bars"></div><div class="ls-glints"></div></div>
+            <div class="ls-frame">
+                <div class="ls-emblem" aria-hidden="true">
+                    <svg class="ls-arch" viewBox="0 0 64 64" width="96" height="96">
+                        <path d="M14 60V26a18 18 0 0 1 36 0v34" />
+                    </svg>
+                    <svg class="ls-gem" viewBox="0 0 40 40" width="40" height="40">
+                        <path class="ls-gem-body" d="M20 3 31 18 20 37 9 18z" />
+                        <path class="ls-gem-facets" d="M9 18h22M20 3l-4 15 4 19 4-19z" />
+                    </svg>
+                    <span class="ls-bubble"></span><span class="ls-bubble"></span><span class="ls-bubble"></span>
+                    <span class="ls-ledge"></span>
+                </div>
+                <h1 class="ls-title">Mayhem<span>Miner</span></h1>
+                <div class="ls-rule"></div>
+                <p class="ls-sub" role="status" aria-live="polite">
+                    Grab every crystal. Watch your air. Find the way out.
+                </p>
+                <div class="ls-air">
+                    <span>Air</span>
+                    <span class="ls-gauge"><span></span></span>
+                </div>
+                <p class="ls-tip">Loading&hellip;</p>
+                <p class="ls-best"></p>
+                <nav class="ls-menu" aria-label="Main menu"></nav>
+                <p class="ls-controls"></p>
+            </div>
+        </div>
+
+        <div id="pause" data-kind="pause">
+            <div class="panel" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+                <h2 id="pause-title">Paused</h2>
+                <p class="p-score"></p>
+                <nav></nav>
+                <div class="controls">
+                    <h3>Controls</h3>
+                    <div class="bindings"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="sheet">
+            <div class="panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+                <h2 id="sheet-title"></h2>
+                <div class="sheet-body"></div>
+                <nav class="sheet-actions"></nav>
+            </div>
+        </div>
+
+        <div id="intro" aria-live="polite">
+            <p id="intro-num"></p>
+            <h2 id="intro-name"></h2>
+            <p id="intro-facts"></p>
+        </div>
+
+        <script type="module" src="/src/main.ts"></script>
+    </body>
+</html>

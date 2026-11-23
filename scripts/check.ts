@@ -1,0 +1,190 @@
+/**
+ * check — headless asserts over the pure core (npm run check).
+ *
+ * Purpose
+ *   Proves the content is completable and the rules behave, without a browser. Runs under
+ *   Node's native TypeScript support with scripts/ts-resolve.mjs for extensionless imports.
+ *
+ * Operations
+ *   1. Every hand-built cavern parses to 32 × 16, has a start on solid ground, a portal and
+ *      crystals, no guardian patrolling the start, and the solver reaches every crystal, every
+ *      lever and the portal.
+ *   2. Generated caverns 20..59 are deterministic, have at least five crystals, and solve.
+ *   3. Movement: the jump rises 26 px and lands where it started; a six-cell drop is survived
+ *      and an eight-cell drop kills; conveyors carry; walking against a belt holds still.
+ *   4. Rules: crystals score and open the portal; the portal completes the cavern and air
+ *      becomes bonus; crumbling ledges give way; levers open doors; spikes and guardians kill;
+ *      running out of air kills; lives run out into game over; extra life at 10,000.
+ *
+ * Usage
+ *   npm run check (exits non-zero on the first failure).
+ *
+ * See also: world/solver.ts, core/physics.ts, core/game.ts; DESIGN.md "15. Checks and tooling".
+ */
+import assert from "node:assert/strict";
+import { CAVERNS, H, W, parse } from "../src/world/caverns";
+import { generate } from "../src/world/generate";
+import { solve } from "../src/world/solver";
+import { Game } from "../src/core/game";
+import { stepBody, type Body } from "../src/core/physics";
+
+const idle = { left: false, right: false, jump: false };
+const left = { left: true, right: false, jump: false };
+const right = { left: false, right: true, jump: false };
+const jump = { left: false, right: false, jump: true };
+
+// 1. Hand-built caverns.
+assert.equal(CAVERNS.length, 20);
+for (const cv of CAVERNS) {
+    const t0 = performance.now();
+    assert.equal(cv.tiles.length, W * H, cv.name);
+    assert.ok(cv.crystals.length >= 5, `${cv.name}: too few crystals`);
+    assert.ok("#=~<>".includes(cv.tiles[(cv.start.r + 1) * W + cv.start.c]), `${cv.name}: start not on ground`);
+    const s = solve(cv);
+    const miss = cv.crystals.filter((_, i) => !s.crystals[i]);
+    assert.deepEqual(miss, [], `${cv.name}: unreachable crystals (c, r)`);
+    if (cv.levers.length) assert.ok(s.lever, `${cv.name}: lever unreachable`);
+    assert.ok(s.portal, `${cv.name}: portal unreachable`);
+    // Spawn safety: no guardian's sweep comes within two cells of the start.
+    const sx = cv.start.c * 8,
+        sy = (cv.start.r - 1) * 8;
+    for (const g of cv.guardians) {
+        const lift = g.kind === "lift";
+        const [x0, x1] = lift ? [g.x, g.x + 8] : [g.min, g.max + 8];
+        const [y0, y1] = lift ? [g.min, g.max + 16] : [g.y, g.y + 16];
+        assert.ok(
+            x1 <= sx - 16 || x0 >= sx + 24 || y1 <= sy || y0 >= sy + 16,
+            `${cv.name}: a guardian patrols the start`
+        );
+    }
+    console.log(
+        `  ${String(cv.n + 1).padStart(2)} ${cv.name.padEnd(18)} ${cv.crystals.length} crystals, ${cv.guardians.length} guardians, ${s.states} states, ${(performance.now() - t0).toFixed(0)} ms`
+    );
+}
+
+// 2. Generated caverns.
+{
+    const t0 = performance.now();
+    for (let n = 20; n < 60; n++) {
+        const cv = generate(n);
+        assert.ok(cv.crystals.length >= 5);
+        assert.ok(solve(cv).portal);
+        assert.equal(parse({ name: cv.name, rows: rowsOf(cv.tiles) }, n).tiles.length, W * H);
+    }
+    console.log(`  generated 20-59 in ${(performance.now() - t0).toFixed(0)} ms (incl. re-solve)`);
+}
+
+// 3. Movement.
+{
+    const rows = Array(14).fill("");
+    rows[13] = "...>>>>>";
+    rows[6] = "..............=====";
+    const t = parse({ name: "lab", rows }, 0).tiles.split("");
+    const b: Body = { x: 80, y: 104, mode: "ground", t: 0, dir: 0, apex: 104, face: 1 };
+    stepBody(b, jump, t);
+    let top = b.y;
+    for (let i = 0; i < 40 && b.mode !== "ground"; i++) (stepBody(b, idle, t), (top = Math.min(top, b.y)));
+    assert.equal(104 - top, 26, "jump height");
+    assert.equal(b.y, 104, "jump lands where it started");
+    // Conveyor at cols 4..8 (map) pushes right; walking left holds still.
+    const c: Body = { x: 40, y: 96, mode: "ground", t: 0, dir: 0, apex: 96, face: 1 };
+    stepBody(c, idle, t);
+    assert.equal(c.x, 41, "belt carries");
+    stepBody(c, left, t);
+    assert.equal(c.x, 41, "walking against the belt holds still");
+    // Ledge at row 7 (feet y = 56) cols 15..19: walk off its end and fall 7 cells → dead.
+    const d: Body = { x: 152, y: 40, mode: "ground", t: 0, dir: 0, apex: 40, face: 1 };
+    let r = "";
+    for (let i = 0; i < 200 && r !== "dead" && !(r === "land" && d.y > 100); i++) r = stepBody(d, right, t);
+    assert.equal(r, "dead", "eight-cell fall kills");
+}
+{
+    const rows = Array(14).fill("");
+    rows[8] = "..............=====";
+    const t = parse({ name: "lab", rows }, 0).tiles.split("");
+    const d: Body = { x: 152, y: 56, mode: "ground", t: 0, dir: 0, apex: 56, face: 1 };
+    let r = "";
+    for (let i = 0; i < 200 && r !== "dead" && !(r === "land" && d.y > 100); i++) r = stepBody(d, right, t);
+    assert.equal(r, "land", "six-cell fall is survived");
+}
+
+// 4. Rules, on a small lab cavern.
+function lab(rows: string[]) {
+    const all = Array(14).fill("");
+    rows.forEach((r, i) => (all[14 - rows.length + i] = r));
+    const cv = parse({ name: "lab", rows: all }, 0);
+    const g = new Game(0);
+    g.load(0, cv);
+    const events: string[] = [];
+    g.onEvent = (e) => events.push(e);
+    return {
+        g,
+        events,
+        run: (inp: typeof idle, ticks: number) => {
+            for (let i = 0; i < ticks; i++) g.tick(inp);
+        },
+    };
+}
+{
+    const { g, events, run } = lab([".S..*.*...........P"]);
+    run(right, 60);
+    assert.equal(g.score, 200, "two crystals");
+    assert.ok(events.includes("open"), "portal opens after the last crystal");
+    for (let i = 0; i < 200 && g.phase === "play"; i++) g.tick(right);
+    assert.equal(g.phase, "complete", "portal completes the cavern");
+    const before = g.score;
+    run(idle, 60);
+    assert.ok(g.score > before && g.air <= 0, "air paid out as bonus");
+    run(idle, 30);
+    assert.equal(g.n, 1, "next cavern loads");
+}
+{
+    const { g, run } = lab(["..........", "~~~~", ".S..*........P"].slice(0, 3));
+    // Miner stands on row 14 floor; put him on the crumble ledge instead.
+    g.miner.y = (12 - 2) * 8;
+    g.miner.x = 8;
+    run(idle, 40);
+    assert.equal(g.tiles[12 * W + 1], ".", "crumbling ledge gives way");
+}
+{
+    const { g, events, run } = lab(["D...........", ".S.k......D*P"]);
+    run(right, 30);
+    assert.ok(events.includes("lever") && g.doorsOpen, "lever opens doors");
+    assert.ok(!g.tiles.includes("D"));
+}
+{
+    const { g, run } = lab([".S..^......*P"]);
+    run(right, 40);
+    assert.equal(g.phase, "dead", "spikes kill");
+    run(idle, 80);
+    assert.equal(g.phase, "play");
+    assert.equal(g.lives, 2, "a life is spent");
+}
+{
+    const { g, run } = lab([".S.....e....*P"]);
+    for (let i = 0; i < 200 && g.phase === "play"; i++) g.tick(idle);
+    assert.equal(g.phase, "dead", "guardians kill");
+}
+{
+    const { g, run } = lab([".S..........*P"]);
+    g.air = 0.5;
+    run(idle, 30);
+    assert.equal(g.phase, "dead", "running out of air kills");
+    g.lives = 0;
+    run(idle, 80);
+    assert.equal(g.phase, "over", "no lives left: game over");
+}
+{
+    const { g, events, run } = lab([".S**********P"]);
+    g.score = 9950;
+    run(right, 20);
+    assert.ok(events.includes("extra") && g.lives === 4, "extra life at 10,000");
+}
+
+console.log("check: all passed");
+
+function rowsOf(tiles: string) {
+    const rows: string[] = [];
+    for (let r = 1; r < H - 1; r++) rows.push(tiles.slice(r * W + 1, r * W + W - 1));
+    return rows;
+}

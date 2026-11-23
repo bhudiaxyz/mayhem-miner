@@ -1,0 +1,25 @@
+{
+    "name": "mayhem-miner",
+    "version": "1.0.0",
+    "description": "Single-screen cavern platformer: grab every crystal before the air runs out, then reach the portal.",
+    "license": "MIT",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite --port 5191 --strictPort",
+        "build": "tsc --noEmit && vite build",
+        "typecheck": "tsc --noEmit",
+        "preview": "vite preview --port 5191 --strictPort",
+        "check": "node --import ./scripts/ts-resolve.mjs scripts/check.ts",
+        "format": "prettier --write \"src/**/*.{ts,css}\" \"scripts/**/*.ts\" vite.config.ts index.html"
+    },
+    "dependencies": {
+        "three": "^0.185.1"
+    },
+    "devDependencies": {
+        "@types/three": "^0.185.4",
+        "prettier": "^3.9.10",
+        "typescript": "^5.9.3",
+        "vite": "^8.2.2"
+    }
+}
