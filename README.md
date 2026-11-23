@@ -1,6 +1,6 @@
 # Mayhem Miner
 
-A single-screen cavern platformer for the browser, built with Three.js, TypeScript and Vite. Pip, a night-shift miner, is sealed in a played-out hill with a leaking air tank. Every cavern holds a handful of glowing crystals. Collect them all and the portal lights up, taking you one cavern deeper. Run out of air, touch a guardian, land on spikes or fall too far and you lose a life.
+A single-screen cavern platformer for the browser, built with Three.js, TypeScript and Vite. Pip, a night-shift miner, is sealed in a played-out hill with a leaking air tank. Every cavern holds a handful of glowing crystals. Collect them all and the portal lights up, taking you one cavern deeper. The deeper you go, the stranger the locals: slimes, beetles and bats at first, then moles, spiders, worms and moths. Run out of air, touch a creature, land on spikes or fall too far and you lose a life.
 
 The game is a homage to the early-1980s single-screen platformers, chiefly Matthew Smith's _Manic Miner_ (ZX Spectrum, 1983) and its later Commodore Amiga releases. Their richer colour and music suggested the copper-bar backdrops and chiptune soundtrack here. The caverns, characters, art, sound and code are all original.
 
