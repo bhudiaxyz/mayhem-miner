@@ -154,6 +154,10 @@ export const COLORS = {
     boots: 0x3a2a20,
     lamp: 0xfff2c0,
     lampLight: 0xffe0a0,
+    /** Lamp blink while a fall is already fatal. */
+    lampDanger: 0xff3020,
+    /** Landing / jump dust (dim so the additive sparks stay under the bloom threshold). */
+    dust: 0x5a5046,
     spike: 0xb8c0cc,
     spikeTip: 0xff3a3a,
     lever: 0xd0d0d8,

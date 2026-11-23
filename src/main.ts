@@ -55,6 +55,14 @@ import {
 
 const IDLE = { left: false, right: false, jump: false };
 const ATTRACT_SECONDS = 6;
+/** Menu focus directions (dx, dy) for arrow keys and pad d-pad / stick. */
+const PAD_DIRS: Record<string, [number, number]> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+const ARROWS: Record<string, [number, number]> = {
+    ArrowUp: PAD_DIRS.up,
+    ArrowDown: PAD_DIRS.down,
+    ArrowLeft: PAD_DIRS.left,
+    ArrowRight: PAD_DIRS.right,
+};
 
 let view: View;
 let attract: Game;
@@ -191,6 +199,7 @@ function onEvent(e: GameEvent) {
         navigator.vibrate?.(120);
     }
     if (e === "crumble") view.burst(mx, m.y + 16, 0xc0a080, 10, 2);
+    if (e === "land" || e === "jump") view.burst(mx, m.y + 16, COLORS.dust, e === "land" ? 8 : 5, 1.4, 1);
     if (e === "lever") message("Somewhere, doors grind open…");
     if (e === "extra") message("Extra life!");
     if (e === "complete") record(g.score, g.n + 1);
@@ -293,15 +302,16 @@ function wireEvents() {
         }
         if (game && paused && e.code === "KeyR" && game.phase !== "over") restart();
         if (game && paused && e.code === "KeyQ") showMenu();
-        if (inMenu() && (e.code === "ArrowDown" || e.code === "ArrowUp")) {
+        const arrow = ARROWS[e.code];
+        if (inMenu() && arrow) {
             e.preventDefault();
-            menuNav(e.code === "ArrowDown" ? 1 : -1);
+            menuNav(...arrow);
         }
     });
     setPadHandler((b) => {
         if (b === "pause") return togglePause();
         if (!inMenu()) return;
-        if (b === "up" || b === "down") menuNav(b === "down" ? 1 : -1);
+        if (b in PAD_DIRS) menuNav(...PAD_DIRS[b]);
         else if (b === "select") menuSelect();
         else if (b === "back" && !menuBack() && game && paused) resume();
     });

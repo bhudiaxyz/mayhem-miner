@@ -33,13 +33,15 @@ export interface TierSettings {
     /** Lamp shadow map edge in px (0 = no shadows). */
     shadowMap: number;
     particles: number;
+    /** Ground-truth ambient occlusion (GTAOPass): contact shadows where blocks meet. */
+    ao: boolean;
 }
 
 export const TIER_SETTINGS: Record<Tier, TierSettings> = {
-    high: { dprCap: 2, msaa: 4, bloom: true, shadowMap: 2048, particles: 600 },
-    "mobile-high": { dprCap: 2, msaa: 2, bloom: true, shadowMap: 1024, particles: 400 },
-    mid: { dprCap: 1.5, msaa: 2, bloom: true, shadowMap: 0, particles: 400 },
-    low: { dprCap: 1, msaa: 0, bloom: false, shadowMap: 0, particles: 200 },
+    high: { dprCap: 2, msaa: 4, bloom: true, shadowMap: 2048, particles: 600, ao: true },
+    "mobile-high": { dprCap: 2, msaa: 2, bloom: true, shadowMap: 1024, particles: 400, ao: false },
+    mid: { dprCap: 1.5, msaa: 2, bloom: true, shadowMap: 0, particles: 400, ao: false },
+    low: { dprCap: 1, msaa: 0, bloom: false, shadowMap: 0, particles: 200, ao: false },
 };
 
 export interface GpuProbe {

@@ -68,6 +68,8 @@ export const CRYSTAL_POINTS = 100;
 export const AIR_POINTS = 20; // per second of air left
 export const EXTRA_LIFE = 10000;
 export const START_LIVES = 3;
+/** Seconds between a death and the cavern restarting. */
+export const DEAD_PAUSE = 1.6;
 
 export class Game {
     n = 0;
@@ -223,7 +225,7 @@ export class Game {
     /** Lose a life and restart the cavern after a pause (also the pause menu's Restart). */
     die() {
         this.phase = "dead";
-        this.timer = 1.6;
+        this.timer = DEAD_PAUSE;
         this.lives--;
         this.deaths++;
         this.onEvent("die");

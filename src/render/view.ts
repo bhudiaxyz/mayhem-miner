@@ -40,10 +40,13 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
-import { CRUMBLE_TICKS, type Game, type Mover } from "../core/game";
+import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import { CRUMBLE_TICKS, DEAD_PAUSE, type Game } from "../core/game";
+import { FALL_LIMIT, TICK } from "../core/physics";
 import { COLORS, hdr, themeFor, type Theme } from "../core/palette";
 import { rng } from "../core/random";
-import { H, W, type Cavern } from "../world/caverns";
+import { H, W, type Cavern, type Guardian } from "../world/caverns";
 import { Effects } from "../fx/effects";
 import type { TierSettings } from "./tier";
 
@@ -51,6 +54,15 @@ const DEPTH = 1.2; // block depth (z)
 /** Miner, guardians and crystals are drawn at 75% of their 1 × 2 cell box, from the feet. */
 const SPRITE = 0.75;
 const FOV = 30;
+/** Seconds the miner tumbles (hops, spins, shrinks) after a death before vanishing. */
+const TUMBLE = 0.8;
+/** How far (world units) the camera drifts toward the miner, for parallax. */
+const DRIFT_X = 0.4,
+    DRIFT_Y = 0.25;
+const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** Facing angles: a turn eases from one to the other through facing the camera. */
+const FACE_R = -0.45,
+    FACE_L = -Math.PI + 0.45;
 
 type Pose = (t: number, moving: number) => void;
 
@@ -62,6 +74,11 @@ export class View {
     private effects: Effects;
     private lamp = new THREE.PointLight(COLORS.lampLight, 9, 9, 1.6);
     private key = new THREE.DirectionalLight(0xffffff, 1.6);
+    /** Lights the cavern around the portal once it opens (dark while closed). */
+    private portalLight = new THREE.PointLight(0xffffff, 0, 7, 1.6);
+    private camBase = new THREE.Vector3();
+    private camLook = new THREE.Vector3();
+    private camDrift = new THREE.Vector3();
     private level = new THREE.Group();
     private built: Cavern | null = null;
     private tex = textures();
@@ -105,7 +122,7 @@ export class View {
             this.key.shadow.bias = -0.0005;
             this.key.shadow.normalBias = 0.03;
         }
-        this.scene.add(this.key, this.key.target, this.lamp, this.level);
+        this.scene.add(this.key, this.key.target, this.lamp, this.portalLight, this.level);
         this.miner = minerModel();
         this.scene.add(this.miner.group);
         this.effects = new Effects(this.scene, ts.particles);
@@ -113,6 +130,12 @@ export class View {
         const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: ts.msaa });
         this.composer = new EffectComposer(this.renderer, target);
         this.composer.addPass(new RenderPass(this.scene, this.camera));
+        if (ts.ao) {
+            const ao = new GTAOPass(this.scene, this.camera, 1, 1);
+            ao.updateGtaoMaterial({ radius: 0.6, thickness: 1 });
+            ao.blendIntensity = 0.8;
+            this.composer.addPass(ao);
+        }
         if (ts.bloom) this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7, 0.4, 0.85));
         this.composer.addPass(new OutputPass());
         this.resize();
@@ -134,8 +157,10 @@ export class View {
         const needH = H + 3.6,
             needW = W + 1;
         const dist = Math.max(needH / 2 / tan, needW / 2 / (tan * aspect));
-        this.camera.position.set(W / 2, H / 2 + dist * 0.06, dist);
-        this.camera.lookAt(W / 2, H / 2 - 0.1, 0);
+        this.camBase.set(W / 2, H / 2 + dist * 0.06, dist);
+        this.camLook.set(W / 2, H / 2 - 0.1, 0);
+        this.camera.position.copy(this.camBase).add(this.camDrift);
+        this.camera.lookAt(this.camLook);
         this.camera.updateProjectionMatrix();
     }
 
@@ -151,8 +176,8 @@ export class View {
         this.effects.clear();
     }
 
-    burst(px: number, py: number, color: number, n: number, speed = 4) {
-        this.effects.burst(px / 8, H - py / 8, hdr(color, 2.2), n, speed);
+    burst(px: number, py: number, color: number, n: number, speed = 4, gravity?: number) {
+        this.effects.burst(px / 8, H - py / 8, hdr(color, 2.2), n, speed, gravity);
     }
 
     sync(g: Game, dt: number) {
@@ -188,34 +213,72 @@ export class View {
             const k = 0.5 + 0.5 * Math.sin(t * 10);
             p.frame.color.copy(hdr(this.theme.glow, 1.6 + k));
             p.core.color.copy(hdr(COLORS.crystalCycle[Math.floor(t * 6) % 5], 0.6 + 0.8 * k));
+            this.portalLight.intensity = 5 + 3 * k;
         } else {
             p.frame.color.setHex(COLORS.portalClosed);
             p.core.color.setHex(0x0a0810);
+            this.portalLight.intensity = 0;
         }
 
+        // Turns ease through facing the camera instead of snapping (frozen while paused: dt = 0).
+        const turn = 1 - Math.exp(-dt * 14);
         g.guardians.forEach((gd, i) => {
             const v = this.guardians[i];
             const x = lerp(gd.px, gd.x, a),
                 y = lerp(gd.py, gd.y, a);
             v.group.position.set(x / 8 + 0.5, H - y / 8 - 2, 0);
-            if (gd.kind !== "lift") v.group.rotation.y = gd.dir > 0 ? -0.45 : Math.PI + 0.45;
+            if (gd.kind !== "lift") v.group.rotation.y += ((gd.dir > 0 ? FACE_R : FACE_L) - v.group.rotation.y) * turn;
             v.pose(t, 1);
         });
 
         const m = g.miner;
-        const show = !g.demo && (g.phase === "play" || (g.phase === "complete" && g.air > 0));
-        this.miner.group.visible = show;
+        const mg = this.miner.group;
+        // Seconds since a death (the miner tumbles for TUMBLE of the DEAD_PAUSE).
+        const since = g.phase === "dead" ? DEAD_PAUSE - g.timer + a * TICK : Infinity;
+        const show = !g.demo && (g.phase === "play" || (g.phase === "complete" && g.air > 0) || since < TUMBLE);
+        mg.visible = show;
+        // Already falling too far to survive: flail and blink the lamp red.
+        const doomed = g.phase === "play" && m.mode !== "ground" && m.y - m.apex > FALL_LIMIT;
+        let x = W / 2,
+            y = H / 2;
         if (show) {
-            const x = lerp(m.px, m.x, a) / 8 + 0.5,
-                y = H - lerp(m.py, m.y, a) / 8 - 2;
-            this.miner.group.position.set(x, y, 0);
-            this.miner.group.rotation.y = m.face > 0 ? -0.45 : Math.PI + 0.45;
-            const s = g.phase === "complete" ? Math.max(0.05, g.air / g.cavern.air) : 1;
-            this.miner.group.scale.setScalar(s * SPRITE);
-            this.miner.pose(m.mode === "ground" ? m.walk * 0.35 : -1, m.mode === "ground" ? 1 : 0);
+            x = lerp(m.px, m.x, a) / 8 + 0.5;
+            y = H - lerp(m.py, m.y, a) / 8 - 2;
+            let s = g.phase === "complete" ? Math.max(0.05, g.air / g.cavern.air) : 1;
+            mg.rotation.y += ((m.face > 0 ? FACE_R : FACE_L) - mg.rotation.y) * turn;
+            mg.rotation.z = 0;
+            let lamp = 9;
+            if (since < TUMBLE) {
+                const k = since / TUMBLE;
+                y += since * 3 - since * since * 8;
+                s = 1 - k;
+                mg.rotation.z = -m.face * since * 9;
+                lamp *= 1 - k;
+            }
+            mg.position.set(x, y, 0);
+            mg.scale.setScalar(s * SPRITE);
+            // Legs follow distance walked, interpolated to the drawn position (not 40 Hz steps).
+            const walk = m.walk - Math.abs(m.x - m.px) * (1 - a);
+            if (doomed || since < TUMBLE) this.miner.pose(t * 28, 1);
+            else this.miner.pose(m.mode === "ground" ? walk * 0.35 : -1, m.mode === "ground" ? 1 : 0);
+            // Low air: the lamp dims and (motion allowing) gutters.
+            const f = g.air / g.cavern.air;
+            if (g.phase === "play" && f < 0.2)
+                lamp *= (0.45 + 2.75 * f) * (REDUCED_MOTION ? 1 : 0.75 + 0.25 * Math.sin(t * 31) * Math.sin(t * 7.7));
             this.lamp.position.set(x + m.face * 0.3, y + 1.9 * SPRITE, 1.4);
-            this.lamp.intensity = 9;
+            this.lamp.intensity = lamp;
         } else this.lamp.intensity = g.demo ? 0 : this.lamp.intensity * 0.9;
+        this.lamp.color.setHex(doomed && Math.floor(t * 12) % 2 ? COLORS.lampDanger : COLORS.lampLight);
+
+        // Camera drifts a little toward the miner so the diorama shows its depth.
+        if (!REDUCED_MOTION) {
+            const k = 1 - Math.exp(-dt * 2);
+            const d = this.camDrift;
+            d.x += (((x - W / 2) / (W / 2)) * DRIFT_X - d.x) * k;
+            d.y += (((y - H / 2) / (H / 2)) * DRIFT_Y - d.y) * k;
+            this.camera.position.copy(this.camBase).add(d);
+            this.camera.lookAt(this.camLook);
+        }
 
         this.effects.update(dt);
         this.composer.render();
@@ -265,13 +328,25 @@ export class View {
             this.level.add(shadows(mesh));
             return mesh;
         };
-        const cube = new THREE.BoxGeometry(1, 1, DEPTH);
-        const slab = new THREE.BoxGeometry(1, 0.32, DEPTH);
-        blocks(cells("#"), cube, new THREE.MeshStandardMaterial({ map: this.tex.rock, roughness: 0.9 }), 0.5, th.rock);
+        // Slightly rounded blocks catch a highlight on every edge; each texture doubles as its bump map.
+        const cube = new RoundedBoxGeometry(1, 1, DEPTH, 2, 0.05);
+        const slab = new RoundedBoxGeometry(1, 0.32, DEPTH, 2, 0.04);
+        blocks(
+            cells("#"),
+            cube,
+            new THREE.MeshStandardMaterial({
+                map: this.tex.rock,
+                bumpMap: this.tex.rock,
+                bumpScale: 2,
+                roughness: 0.9,
+            }),
+            0.5,
+            th.rock
+        );
         blocks(
             cells("="),
             slab,
-            new THREE.MeshStandardMaterial({ map: this.tex.ledge, roughness: 0.8 }),
+            new THREE.MeshStandardMaterial({ map: this.tex.ledge, bumpMap: this.tex.ledge, roughness: 0.8 }),
             0.16,
             th.ledge
         );
@@ -279,7 +354,12 @@ export class View {
         this.crumble = blocks(
             this.crumbleCells,
             slab.clone(),
-            new THREE.MeshStandardMaterial({ map: this.tex.crumble, roughness: 1 }),
+            new THREE.MeshStandardMaterial({
+                map: this.tex.crumble,
+                bumpMap: this.tex.crumble,
+                bumpScale: 2,
+                roughness: 1,
+            }),
             0.16,
             th.crumble
         );
@@ -294,7 +374,7 @@ export class View {
             blocks(
                 cells(ch),
                 slab.clone(),
-                new THREE.MeshStandardMaterial({ map, roughness: 0.5, metalness: 0.3 }),
+                new THREE.MeshStandardMaterial({ map, bumpMap: map, roughness: 0.5, metalness: 0.3 }),
                 0.16,
                 th.belt
             );
@@ -303,7 +383,12 @@ export class View {
         const doorMesh = blocks(
             cells("D"),
             cube.clone(),
-            new THREE.MeshStandardMaterial({ map: this.tex.door, emissive: COLORS.doorGlow, emissiveIntensity: 0.25 }),
+            new THREE.MeshStandardMaterial({
+                map: this.tex.door,
+                bumpMap: this.tex.door,
+                emissive: COLORS.doorGlow,
+                emissiveIntensity: 0.25,
+            }),
             0.5,
             COLORS.door
         );
@@ -412,10 +497,12 @@ export class View {
         pg.position.set(cv.portal.c + 1, H - cv.portal.r - 1, 0);
         this.level.add(pg);
         this.portal = { group: pg, frame, core };
+        this.portalLight.color.setHex(th.glow);
+        this.portalLight.position.set(cv.portal.c + 1, H - cv.portal.r - 1, 1.2);
 
         const hue = (n * 0.137) % 1;
         const walker = [robotModel, crawlerModel, blobModel][n % 3];
-        this.guardians = cv.guardians.map((gd: Pick<Mover, "kind">) => {
+        this.guardians = cv.guardians.map((gd: Guardian) => {
             const col = new THREE.Color().setHSL(
                 hue + (gd.kind === "lift" ? 0.33 : gd.kind === "fly" ? 0.6 : 0),
                 0.65,
@@ -424,7 +511,8 @@ export class View {
             const v = gd.kind === "lift" ? droneModel(col) : gd.kind === "fly" ? batModel(col) : walker(col);
             v.group.traverse((o) => (o.castShadow = this.ts.shadowMap > 0));
             v.group.scale.setScalar(SPRITE);
-            this.level.add(v.group);
+            if (gd.kind !== "lift") v.group.rotation.y = gd.dir > 0 ? FACE_R : FACE_L;
+            this.level.add(v.group, patrolZone(gd, col));
             return v;
         });
         this.miner.group.traverse((o) => (o.castShadow = this.ts.shadowMap > 0));
@@ -432,6 +520,21 @@ export class View {
 }
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/** A faint tint on the back wall over the box a guardian sweeps, so its patrol reads at a glance. */
+function patrolZone(gd: Guardian, col: THREE.Color) {
+    const lift = gd.kind === "lift";
+    const x0 = lift ? gd.x : gd.min,
+        x1 = lift ? gd.x + 8 : gd.max + 8;
+    const y0 = lift ? gd.min : gd.y,
+        y1 = lift ? gd.max + 16 : gd.y + 16;
+    const m = new THREE.Mesh(
+        new THREE.PlaneGeometry((x1 - x0) / 8, (y1 - y0) / 8),
+        new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.14, depthWrite: false })
+    );
+    m.position.set((x0 + x1) / 16, H - (y0 + y1) / 16, -DEPTH / 2 - 0.01);
+    return m;
+}
 
 // ---- Models ---------------------------------------------------------------------------------------
 // Each model is a Group with its feet at the origin, facing +x, about 1 wide and 2 tall,

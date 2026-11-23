@@ -11,8 +11,8 @@
  *   - renderMainMenu(items): buttons into .ls-menu; the first enabled one takes focus.
  *   - showSheet({ title, body, actions, onBack }): opens #sheet; Esc / gamepad B = onBack.
  *   - renderButtons(host, actions): the shared button row builder (sheets and pause).
- *   - menuNav(dir) / menuSelect() / menuBack(): arrows and gamepad d-pad / A / B move focus
- *     through the top-most menu and press the focused control.
+ *   - menuNav(dx, dy) / menuSelect() / menuBack(): arrows and gamepad d-pad / stick / A / B
+ *     move focus spatially through the top-most menu and press the focused control.
  *   - cavernSelectBody(reached, onPick): a grid of caverns 1 .. reached + 1 with names.
  *   - HOWTO: the How to play body.
  *   - showIntro(n, name, facts): the 2.4 s cavern title card.
@@ -106,11 +106,28 @@ function focusables(): HTMLElement[] {
     return [...root.querySelectorAll<HTMLElement>("button:not([disabled])")].filter((e) => e.offsetParent !== null);
 }
 
-export function menuNav(dir: 1 | -1) {
+/**
+ * Spatial focus move: the nearest control in direction (dx, dy), so grids and the two-column
+ * short-screen menu work with all four arrows. Nothing that way: step through document order.
+ */
+export function menuNav(dx: number, dy: number) {
     const els = focusables();
     if (!els.length) return;
-    const i = els.indexOf(document.activeElement as HTMLElement);
-    els[(i + dir + els.length) % els.length].focus({ preventScroll: true });
+    const cur = document.activeElement as HTMLElement;
+    const i = els.indexOf(cur);
+    if (i < 0) return els[0].focus({ preventScroll: true });
+    const a = cur.getBoundingClientRect();
+    let best: HTMLElement | undefined,
+        bestD = Infinity;
+    for (const e of els) {
+        const b = e.getBoundingClientRect();
+        const ex = b.left + b.width / 2 - (a.left + a.width / 2),
+            ey = b.top + b.height / 2 - (a.top + a.height / 2);
+        const along = ex * dx + ey * dy;
+        const d = along + 2 * Math.abs(dx ? ey : ex);
+        if (along > 1 && d < bestD) ((bestD = d), (best = e));
+    }
+    (best ?? els[(i + dx + dy + els.length) % els.length]).focus({ preventScroll: true });
 }
 
 export function menuSelect() {

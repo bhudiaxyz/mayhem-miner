@@ -270,22 +270,23 @@ Guardians keep moving in every phase, so the cavern stays alive behind dialogs. 
 ### 9.1 Scene and camera
 
 - Game pixels map to world units as `x / 8` and `16 − y / 8`: one cell is one unit, and y flips so up is up. Blocks are 1 × 1 × 1.2 deep (`DEPTH`), centred on z = 0.
-- **Camera**: perspective, 30° FOV, fixed. `resize()` computes the distance that fits **(32 + 1) × (16 + 3.6)** units into the host element (the extra height is room for the HUD bars), whichever axis is tighter. It raises the camera by 6% of that distance and looks back down at the centre, so ledge tops read as surfaces.
+- **Camera**: perspective, 30° FOV, fixed. `resize()` computes the distance that fits **(32 + 1) × (16 + 3.6)** units into the host element (the extra height is room for the HUD bars), whichever axis is tighter. It raises the camera by 6% of that distance and looks back down at the centre, so ledge tops read as surfaces. In play the camera **drifts** up to 0.4 × 0.25 units toward the miner (eased, off under `prefers-reduced-motion`), so the diorama shows its depth.
 - The canvas fills **`#app`, whose size CSS decides** (§10.3). A `ResizeObserver` on `#app` reframes the camera whenever the layout changes, including rotation and the touch strip appearing.
-- **Lights**: a hemisphere light (cool sky, warm ground), a key directional light from upper left, and the **helmet lamp**, a warm point light riding just ahead of the miner's head that lights the surrounding rock as he moves. On high tiers the key light casts PCF shadows (2048² or 1024², a ±20-unit frustum) from blocks, spikes, guardians and the miner onto the back wall.
+- **Lights**: a hemisphere light (cool sky, warm ground), a key directional light from upper left, and the **helmet lamp**, a warm point light riding just ahead of the miner's head that lights the surrounding rock as he moves; it blinks red once a fall is already fatal, and dims and gutters under 20% air. A **portal light** in the theme glow lights the cavern around the portal once it opens. On high tiers the key light casts PCF shadows (2048² or 1024², a ±20-unit frustum) from blocks, spikes, guardians and the miner onto the back wall.
 - **What glows**: ACES Filmic tone mapping, and "neon" materials use `toneMapped: false` with HDR colours (channels above 1), so only they cross the bloom threshold (0.85). They are the crystals, edge strips, the open portal, the lamp, guardian eyes, the lever knob and sparks.
 
 ### 9.2 Building a cavern
 
 `build(cavern, n)` disposes the previous cavern's group (geometries and materials) and creates:
 
-- **Rock, ledges, crumbling ledges, conveyors and doors** as one `InstancedMesh` each (cubes for `#` and `D`, 0.32-thick slabs for one-way tiles), with a per-instance colour of the theme tint × a seeded ±10% jitter so no two blocks match.
+- **Rock, ledges, crumbling ledges, conveyors and doors** as one `InstancedMesh` each (slightly rounded cubes for `#` and `D`, 0.32-thick rounded slabs for one-way tiles, from `RoundedBoxGeometry`, so every edge catches a highlight), with a per-instance colour of the theme tint × a seeded ±10% jitter so no two blocks match.
 - **Edge strips**: a thin `InstancedMesh` of HDR bars along the front-top edge of every standable tile with air above, in the theme's glow colour. They outline every surface you can land on.
 - **Spikes**: two cones per `^` cell, pointing down if they hang from something and up otherwise.
 - **Crystals** (octahedra), **levers** (base, arm, glowing knob), the **portal** (four frame bars around a core plane), and one **model per guardian** (§9.3).
+- A **patrol zone** per guardian: a faint plane in its colour on the back wall over the box it sweeps, so routes can be planned at a glance.
 - The **backdrop** plane behind everything (§11).
 
-Textures are 16 × 16 greyscale pixel-art tiles painted at start-up into canvases (`textures()`: mottled rock, planked ledge, cracked crumble, chevron belt, banded door). They use nearest filtering with no mipmaps and are tinted per instance, so there are no image files. The two belt directions get their own clone of the belt texture so they can scroll opposite ways.
+Textures are 16 × 16 greyscale pixel-art tiles painted at start-up into canvases (`textures()`: mottled rock, planked ledge, cracked crumble, chevron belt, banded door). They use nearest filtering with no mipmaps and are tinted per instance, so there are no image files. Each texture is also its material's `bumpMap`, so the grit reacts to the lamp. The two belt directions get their own clone of the belt texture so they can scroll opposite ways.
 
 ### 9.3 Models
 
@@ -300,7 +301,7 @@ Every model is a `Group` with its feet at the origin, facing +x, about 1 wide an
 | bat     | fliers                     | wings flap, body bobs                                       |
 | drone   | lifts                      | core tumbles, glowing ring precesses                        |
 
-Guardian colours are an HSL hue stepped by cavern (`n · 0.137`), offset per guardian kind. Facing is a rotation of ±0.45 rad off side-on, so the models read as 3D.
+Guardian colours are an HSL hue stepped by cavern (`n · 0.137`), offset per guardian kind. Facing is a rotation of ±0.45 rad off side-on, so the models read as 3D. Turns ease between the two angles through facing the camera rather than snapping.
 
 ### 9.4 Per-frame posing (`sync`)
 
@@ -310,15 +311,15 @@ Guardian colours are an HSL hue stepped by cavern (`n · 0.137`), offset per gua
 - **Crystals** spin, bob and **flash**: their colour steps through `COLORS.crystalCycle` at 8 Hz, each offset by its index. Taken ones hide.
 - **Portal**: dark grey while closed; once open, the frame pulses in the theme glow and the core cycles colours.
 - **Conveyor** textures scroll at 1.2 tiles/s in their belt direction.
-- **Miner**: hidden in demo and `dead` phases; during `complete` it shrinks as the air drains, as if drawn into the portal.
+- **Miner**: hidden in demo; on a death it hops, spins and shrinks away over 0.8 s (`TUMBLE`) of the `dead` pause; during `complete` it shrinks as the air drains, as if drawn into the portal. The leg swing uses distance walked interpolated to the drawn position. While a fall is already fatal (`y − apex > FALL_LIMIT`) it flails.
 
 ### 9.5 Effects
 
-`Effects` is one additive `Points` layer over a fixed pool (200–600 sparks by tier). `burst()` adds sparks with random direction and speed, and a full pool overwrites random slots. Each frame `update()` integrates gravity, fades colour by remaining life, and **compacts** live sparks to the front so the draw range is exactly the live set. main.ts fires bursts for crystals (in the crystal's colour), the portal opening, deaths (helmet yellow and overall blue) and crumbles. There is no per-frame allocation.
+`Effects` is one additive `Points` layer over a fixed pool (200–600 sparks by tier). `burst()` adds sparks with random direction and speed, and a full pool overwrites random slots. Each frame `update()` integrates gravity, fades colour by remaining life, and **compacts** live sparks to the front so the draw range is exactly the live set. main.ts fires bursts for crystals (in the crystal's colour), the portal opening, deaths (helmet yellow and overall blue), crumbles, and a little low-gravity dust on every jump and landing. There is no per-frame allocation.
 
 ### 9.6 Post-processing
 
-`EffectComposer` renders into a **HalfFloat render target with MSAA samples** from the tier (4 / 2 / 2 / 0), so HDR neon survives above 1 for bloom. The canvas itself has no MSAA, since it's only a copy target. Passes: `RenderPass` → `UnrealBloomPass` (strength 0.7, radius 0.4, threshold 0.85; skipped on low) → `OutputPass` (tone mapping, sRGB).
+`EffectComposer` renders into a **HalfFloat render target with MSAA samples** from the tier (4 / 2 / 2 / 0), so HDR neon survives above 1 for bloom. The canvas itself has no MSAA, since it's only a copy target. Passes: `RenderPass` → `GTAOPass` (ambient occlusion, radius 0.6, blend 0.8; `high` tier only) → `UnrealBloomPass` (strength 0.7, radius 0.4, threshold 0.85; skipped on low) → `OutputPass` (tone mapping, sRGB).
 
 ## 10. UI, menus and progress
 
@@ -368,12 +369,12 @@ All colours live here; the only exceptions are the pre-JS splash background in `
 
 `classifyGpu` and `detectTier` are the sibling thrust-force project's GPU classifier, unchanged: it probes `UNMASKED_RENDERER_WEBGL` from a throwaway WebGL2 context with `powerPreference: 'high-performance'`, detects mobile by user agent (plus iPadOS via `maxTouchPoints`), and maps renderer strings to tiers. `?tier=` overrides it. A single screen of voxels is cheap, so the tiers only trade resolution, anti-aliasing, bloom, shadows and spark count:
 
-| Tier          | Typical hardware                                        | DPR | MSAA | Bloom | Shadows | Sparks |
-| ------------- | ------------------------------------------------------- | --- | ---- | ----- | ------- | ------ |
-| `high`        | desktop discrete GPU, Apple Silicon Mac                 | 2   | 4×   | ✓     | 2048    | 600    |
-| `mobile-high` | flagship phones and tablets, every WebGL2 iPad / iPhone | 2   | 2×   | ✓     | 1024    | 400    |
-| `mid`         | modern integrated GPUs, 2019–21 phones                  | 1.5 | 2×   | ✓     | –       | 400    |
-| `low`         | older Intel UHD / HD, budget phones, software GL        | 1   | –    | –     | –       | 200    |
+| Tier          | Typical hardware                                        | DPR | MSAA | Bloom | Shadows | AO  | Sparks |
+| ------------- | ------------------------------------------------------- | --- | ---- | ----- | ------- | --- | ------ |
+| `high`        | desktop discrete GPU, Apple Silicon Mac                 | 2   | 4×   | ✓     | 2048    | ✓   | 600    |
+| `mobile-high` | flagship phones and tablets, every WebGL2 iPad / iPhone | 2   | 2×   | ✓     | 1024    | –   | 400    |
+| `mid`         | modern integrated GPUs, 2019–21 phones                  | 1.5 | 2×   | ✓     | –       | –   | 400    |
+| `low`         | older Intel UHD / HD, budget phones, software GL        | 1   | –    | –     | –       | –   | 200    |
 
 Without WebGL2, boot explains why instead of failing obscurely.
 
@@ -392,9 +393,10 @@ Without WebGL2, boot explains why instead of failing obscurely.
 All devices feed one `Input { left, right, jump }`:
 
 - **Keyboard**: `KEYS` maps `KeyboardEvent.code`, so bindings are layout-independent: ← → / A D / O P to walk, Space / ↑ / W to jump. Mapped keys `preventDefault` (no page scrolling). A key on a focused menu button is left alone outside a run, so Space and Enter still press menu buttons. Commands (Esc pause, M mute, R restart and Q menu while paused, ↑ ↓ in menus) are handled in `main.ts`.
-- **Touch buttons** (`#touch [data-k]`): `pointerdown` with `setPointerCapture` sets the field and `pointerup` / `pointercancel` clear it, so sliding a thumb off a button still releases it. They show only during a run on coarse pointers.
-- **Gamepads** (standard mapping, polled every frame): left stick (±0.4 dead zone) or d-pad ← → to walk; A, B or d-pad ↑ to jump. Start, d-pad ↑ ↓, A and B also fire edge-triggered `onPadButton` events that main.ts uses to pause and to move through menus.
-- `readInput()` returns a copy of the held state OR'd with the pads. **Holding jump keeps jumping** on every landing, as in the classic genre. `clearInput()` releases everything on blur and when dialogs open.
+- **Touch buttons** (`#touch [data-k]`): each finger is tracked by `pointerId`. `pointerdown` on a button holds its key; on `pointermove` the key follows whatever button is under the finger (`elementFromPoint`), so a thumb can roll from ◀ to ▶ without lifting. Sliding **up off ◀ or ▶** (within 1.5 button heights) holds that direction plus jump: a one-thumb diagonal jump. `pointerup` / `pointercancel` release. They show only during a run on coarse pointers.
+- **Gamepads** (standard mapping, polled every frame): left stick (±0.4 dead zone) or d-pad ← → to walk; A, B or d-pad ↑ to jump. Start, the d-pad, the stick (past ±0.6, as virtual buttons) and A / B also fire edge-triggered `onPadButton` events that main.ts uses to pause and to move through menus.
+- `readInput()` returns a copy of the held state OR'd with the pads. **Holding jump keeps jumping** on every landing, as in the classic genre. A **jump buffer** keeps any fresh jump press alive for 100 ms (4 ticks), so a tap just before landing still jumps. It lives in input, not `stepBody`, so the solver's movement is unchanged.
+- **Menu focus is spatial** (`menuNav(dx, dy)`): arrows, d-pad and stick move to the nearest control in that direction, so the two-column short-screen menu and the cavern grid work in all four directions; with nothing that way, focus steps through document order (wrapping). `clearInput()` releases everything on blur and when dialogs open.
 - `HELP` holds the device's `[key, action]` rows (touch or keyboard). main.ts renders it into the splash hint line, How to play and the pause dialog.
 
 ## 14. Audio (`fx/audio.ts`)
@@ -474,7 +476,9 @@ npm run preview    # serve dist/ (then: python scripts/smoke.py)
 | `AIR_POINTS`      | `core/game.ts`      | 20                       | per second of air left                    |
 | `EXTRA_LIFE`      | `core/game.ts`      | 10,000                   | points per extra life                     |
 | `START_LIVES`     | `core/game.ts`      | 3                        | lives per run                             |
-| dead pause        | `Game.die`          | 1.6 s                    | before the cavern restarts                |
+| `DEAD_PAUSE`      | `core/game.ts`      | 1.6 s                    | before the cavern restarts                |
+| `TUMBLE`          | `render/view.ts`    | 0.8 s                    | death tumble before the miner vanishes    |
+| jump buffer       | `player/input.ts`   | 100 ms                   | early jump taps still count on landing    |
 | `BANDS`           | `world/generate.ts` | rows 12, 9, 6, 3         | generated ledge bands (one jump apart)    |
 | `ATTRACT_SECONDS` | `main.ts`           | 6 s                      | title-screen cavern cycle                 |
 | bloom             | `render/view.ts`    | 0.7 / 0.4 / 0.85         | strength / radius / threshold             |
