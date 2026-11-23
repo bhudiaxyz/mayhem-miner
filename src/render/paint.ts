@@ -334,7 +334,7 @@ function feature(g: Ctx, glow: Ctx, r: () => number, th: Theme) {
                 a += (r() - 0.5) * 0.6;
                 x += Math.cos(a) * 1.5;
                 y += Math.sin(a);
-                const s = r() < 0.04 ? 3 : 1;
+                const s = r() < 0.06 ? 3 : 2;
                 for (const ctx of [g, glow]) {
                     ctx.fillStyle = vein;
                     ctx.globalAlpha = ctx === g ? 0.55 : 0.5;

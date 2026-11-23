@@ -440,24 +440,24 @@ function generatedTheme(n: number): Theme {
     const bh = h + (r() - 0.5) * 0.15;
     return {
         name: `Cavern ${n + 1}`,
-        rock: hex(h, sat * 0.7, 0.22 + r() * 0.12),
+        rock: hex(h, sat * 0.7, 0.16 + r() * 0.1),
         ledge: hex(h + 0.04, sat, 0.55 + r() * 0.15),
         crumble: hex(h, sat * 0.6, 0.4),
         belt: hex(h + 0.5, 0.15, 0.4),
         glow: hex(h + (r() - 0.5) * 0.2, 1, 0.65),
         bars: [
             css(bh, 0.6, 0.03),
-            css(bh, 0.6, 0.1),
-            css(bh + 0.03, 0.55, 0.22),
-            css(bh + 0.06, 0.6, 0.45),
-            css(bh, 0.6, 0.05),
+            css(bh, 0.6, 0.08),
+            css(bh + 0.03, 0.55, 0.16),
+            css(bh + 0.06, 0.6, 0.3),
+            css(bh, 0.6, 0.04),
         ],
         rockStyle: pick(ROCK_STYLES),
         back: pick(BACK_STYLES),
         wall: pick(WALL_STYLES),
         motes: pick(MOTES),
         mote: hex(h + 0.1, 0.8, 0.75),
-        sky: hex(h, 0.35, 0.82),
+        sky: hex(h, 0.35, 0.7),
         ground: hex(h + 0.5, 0.3, 0.15),
     };
 }
