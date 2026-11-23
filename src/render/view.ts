@@ -588,12 +588,23 @@ export class View {
         this.portalLight.color.setHex(th.glow);
         this.portalLight.position.set(cv.portal.c + 1, H - cv.portal.r - 1, 1.2);
 
-        const hue = (n * 0.137) % 1;
+        // Each cavern's creatures get their own palette (seeded by name): a hue family set
+        // opposite the back wall's so they always stand out, a cavern-wide saturation and
+        // lightness, and a slightly different shade for every creature. Kinds stay apart in hue.
+        const pal = rng(seed ^ 0x5bd1e995);
+        const bg = { h: 0, s: 0, l: 0 };
+        new THREE.Color(th.bars[3]).getHSL(bg, THREE.SRGBColorSpace);
+        const family = bg.h + 0.35 + pal() * 0.3,
+            sat = 0.5 + pal() * 0.35,
+            light = 0.42 + pal() * 0.16;
+        const KIND_HUE = { walk: 0, fly: 0.14, lift: -0.14 };
         this.guardians = cv.guardians.map((gd: Guardian) => {
+            const h = family + KIND_HUE[gd.kind] + (pal() - 0.5) * 0.08;
             const col = new THREE.Color().setHSL(
-                hue + (gd.kind === "lift" ? 0.33 : gd.kind === "fly" ? 0.6 : 0),
-                0.65,
-                0.5
+                ((h % 1) + 1) % 1,
+                Math.min(1, sat + (pal() - 0.5) * 0.15),
+                light + (pal() - 0.5) * 0.12,
+                THREE.SRGBColorSpace
             );
             const v = guardianModel(gd.kind, n, col);
             v.group.traverse((o) => (o.castShadow = this.ts.shadowMap > 0 && !o.userData.fx));

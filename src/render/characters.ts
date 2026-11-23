@@ -680,6 +680,7 @@ function spider(c: number): Character {
                 [x, 2, side * 2.5]
             );
             l.userData.k = i + (side > 0 ? 0.5 : 0);
+            l.userData.side = side;
             return l;
         })
     );
@@ -698,7 +699,8 @@ function spider(c: number): Character {
     return {
         group,
         pose: (s) => {
-            for (const l of legs) l.rotation.x = Math.sin(s.t * 6 + l.userData.k * 2) * 0.12;
+            // Legs splay outward from the body and twitch.
+            for (const l of legs) l.rotation.x = l.userData.side * -0.55 + Math.sin(s.t * 6 + l.userData.k * 2) * 0.12;
             body.rotation.y = Math.sin(s.t * 0.9) * 0.5;
             silk.scale.y = Math.max(0.01, (s.reach ?? 0) - 9 * VOX);
         },
@@ -739,7 +741,8 @@ function moth(c: number): Character {
     return {
         group,
         pose: (s) => {
-            const f = Math.sin(s.t * 20) * 0.9;
+            // Wings held in a raised V and flapped through it, so they read from the side.
+            const f = 0.5 + Math.sin(s.t * 20) * 0.7;
             wings[0].rotation.x = f;
             wings[1].rotation.x = -f;
             const y = 7 + Math.sin(s.t * 5) * 1;
