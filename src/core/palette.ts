@@ -425,13 +425,14 @@ export const THEMES: Theme[] = ROWS.map(
 const ROCK_STYLES: RockStyle[] = ["mottled", "strata", "fractured", "cobble", "crystal"];
 const BACK_STYLES: BackStyle[] = ["bars", "strata", "cave", "stars", "roots", "veins"];
 const MOTES: MoteKind[] = ["dust", "spores", "embers", "drips", "bubbles", "glints"];
-const WALL_STYLES: WallStyle[] = ["rock", "stone", "rubble", "marble", "mud", "fissured"];
+export const WALL_STYLES: WallStyle[] = ["rock", "stone", "rubble", "marble", "mud", "fissured"];
 
 /** A seeded theme for generated caverns (n ≥ 20): its own hue, styles and motes. */
 function generatedTheme(n: number): Theme {
     const r = rng(n * 7919 + 13);
     const pick = <T>(a: T[]) => a[Math.floor(r() * a.length)];
-    const col = (h: number, s: number, l: number) => new THREE.Color().setHSL(((h % 1) + 1) % 1, s, l);
+    const col = (h: number, s: number, l: number) =>
+        new THREE.Color().setHSL(((h % 1) + 1) % 1, s, l, THREE.SRGBColorSpace);
     const hex = (h: number, s: number, l: number) => col(h, s, l).getHex();
     const css = (h: number, s: number, l: number) => `#${col(h, s, l).getHexString()}`;
     // Golden-ratio hue steps keep neighbouring caverns far apart on the colour wheel.
@@ -440,7 +441,7 @@ function generatedTheme(n: number): Theme {
     const bh = h + (r() - 0.5) * 0.15;
     return {
         name: `Cavern ${n + 1}`,
-        rock: hex(h, sat * 0.7, 0.16 + r() * 0.1),
+        rock: hex(h, sat * 0.6, 0.16 + r() * 0.1),
         ledge: hex(h + 0.04, sat, 0.55 + r() * 0.15),
         crumble: hex(h, sat * 0.6, 0.4),
         belt: hex(h + 0.5, 0.15, 0.4),
@@ -457,7 +458,7 @@ function generatedTheme(n: number): Theme {
         wall: pick(WALL_STYLES),
         motes: pick(MOTES),
         mote: hex(h + 0.1, 0.8, 0.75),
-        sky: hex(h, 0.35, 0.7),
+        sky: hex(h, 0.3, 0.78),
         ground: hex(h + 0.5, 0.3, 0.15),
     };
 }

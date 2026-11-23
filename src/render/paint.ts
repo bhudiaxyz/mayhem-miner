@@ -12,7 +12,8 @@
  *     mottled, strata, fractured, cobble or crystal.
  *   - backdropTextures(theme, seed): the back wall, 16 px per cell, in three layers:
  *       1. the theme gradient, quantised into flat bands (the copper-bar look);
- *       2. natural rock (theme.wall): rock, stone (boulders), rubble, marble, mud or fissured,
+ *       2. natural rock (theme.wall, mottled with soft patches of a second seeded style):
+ *          rock, stone (boulders), rubble, marble, mud or fissured,
  *          as light / dark overlays so the gradient tints it (no masonry: these are caves);
  *       3. a feature (theme.back): bars (none), strata waves, cave stalactites, glowworm
  *          stars, hanging roots or ore veins.
@@ -27,7 +28,7 @@
  */
 import * as THREE from "three";
 import { rng } from "../core/random";
-import type { RockStyle, Theme } from "../core/palette";
+import { WALL_STYLES, type RockStyle, type Theme } from "../core/palette";
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -161,6 +162,10 @@ export function rockTexture(style: RockStyle, seed: number) {
 
 const BW = 512,
     BH = 256;
+/** How strongly the rock pattern and features show over the gradient (1 = full strength). */
+const BACKDROP_DETAIL = 0.45;
+/** Saturation of the back-wall gradient (1 = the theme's colours as written). */
+const BACKDROP_SATURATION = 0.65;
 
 /** Light or dark overlay of strength k (k < 0 darkens). */
 const tone = (k: number) => (k < 0 ? `rgba(0,0,0,${-k})` : `rgba(255,255,255,${k})`);
@@ -172,7 +177,7 @@ function wall(g: Ctx, r: () => number, style: Theme["wall"]) {
         const C = 4,
             cols = BW / C,
             rows = BH / C;
-        const seeds = Array.from({ length: 70 }, () => [r() * cols, r() * rows, (r() - 0.5) * 0.3]);
+        const seeds = Array.from({ length: 170 }, () => [r() * cols, r() * rows, (r() - 0.5) * 0.24]);
         const cell = new Int16Array(cols * rows);
         for (let y = 0; y < rows; y++)
             for (let x = 0; x < cols; x++) {
@@ -274,10 +279,10 @@ function wall(g: Ctx, r: () => number, style: Theme["wall"]) {
                 a += (r() - 0.5) * 0.9;
                 x += Math.cos(a) * 1.5;
                 y += Math.sin(a) * 1.5;
-                g.fillStyle = tone(-0.5);
-                g.fillRect(Math.floor(x), Math.floor(y), 2, 2);
-                g.fillStyle = tone(0.07);
-                g.fillRect(Math.floor(x), Math.floor(y) - 1, 2, 1);
+                g.fillStyle = tone(-0.32);
+                g.fillRect(Math.floor(x), Math.floor(y), 1, 1);
+                g.fillStyle = tone(0.06);
+                g.fillRect(Math.floor(x), Math.floor(y) - 1, 1, 1);
             }
         }
     } else {
@@ -365,9 +370,9 @@ function feature(g: Ctx, glow: Ctx, r: () => number, th: Theme) {
                 a += (r() - 0.5) * 0.25 + (Math.PI / 2 - a) * 0.05;
                 x += Math.cos(a);
                 y += Math.sin(a);
-                g.fillStyle = "rgba(30,16,6,0.6)";
+                g.fillStyle = "rgba(30,16,6,0.4)";
                 g.fillRect(Math.floor(x), Math.floor(y), Math.max(1, Math.round(w * (1 - k / len))), 1);
-                if (w > 1.5 && r() < 0.02) strand(x, y, (len - k) * 0.6, w * 0.6);
+                if (w > 1.5 && r() < 0.012) strand(x, y, (len - k) * 0.6, w * 0.6);
             }
         };
         for (let x = r() * 30; x < BW; x += 20 + r() * 50) strand(x, 16, 30 + r() * 110, 2 + r() * 3);
@@ -385,7 +390,7 @@ function feature(g: Ctx, glow: Ctx, r: () => number, th: Theme) {
                 const s = r() < 0.06 ? 3 : 2;
                 for (const ctx of [g, glow]) {
                     ctx.fillStyle = vein;
-                    ctx.globalAlpha = ctx === g ? 0.55 : 0.5;
+                    ctx.globalAlpha = ctx === g ? 0.4 : 0.2;
                     ctx.fillRect(Math.floor(x), Math.floor(y), s, s);
                 }
             }
@@ -408,14 +413,47 @@ export function backdropTextures(th: Theme, seed: number) {
             th.bars.forEach((s, i) => grad.addColorStop(i / (th.bars.length - 1), s));
             g.fillStyle = grad;
             g.fillRect(0, 0, BW, BH);
-            // Quantise into flat bands, the copper-list look.
+            // Quantise into flat bands (the copper-list look), desaturated so the wall stays calm.
             const img = g.getImageData(0, 0, 1, BH).data;
             for (let y = 0; y < BH; y += 8) {
-                g.fillStyle = `rgb(${img[y * 4]},${img[y * 4 + 1]},${img[y * 4 + 2]})`;
+                const [R, G, B] = [img[y * 4], img[y * 4 + 1], img[y * 4 + 2]];
+                const l = 0.3 * R + 0.59 * G + 0.11 * B;
+                const mix = (c: number) => Math.round(l + (c - l) * BACKDROP_SATURATION);
+                g.fillStyle = `rgb(${mix(R)},${mix(G)},${mix(B)})`;
                 g.fillRect(0, y, BW, 8);
             }
-            wall(g, r, th.wall);
-            feature(g, glow, r, th);
+            // Rock and features go on their own layer, blended in softly: the wall is a backdrop,
+            // and the level in front of it must always stand out.
+            const canvas = () => {
+                const c = document.createElement("canvas");
+                c.width = BW;
+                c.height = BH;
+                return [c, c.getContext("2d")!] as const;
+            };
+            const [layer, lg] = canvas();
+            wall(lg, r, th.wall);
+            // A mottled mix: soft patches of a second rock style (seeded) blended into the first.
+            const others = WALL_STYLES.filter((w) => w !== th.wall);
+            const [patch, pg] = canvas();
+            wall(pg, r, others[Math.floor(r() * others.length)]);
+            const [mask, mg] = canvas();
+            for (let i = 0; i < 9; i++) {
+                const x = r() * BW,
+                    y = r() * BH,
+                    rad = 40 + r() * 90;
+                const m = mg.createRadialGradient(x, y, 0, x, y, rad);
+                m.addColorStop(0, "rgba(0,0,0,1)");
+                m.addColorStop(1, "rgba(0,0,0,0)");
+                mg.fillStyle = m;
+                mg.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+            }
+            pg.globalCompositeOperation = "destination-in";
+            pg.drawImage(mask, 0, 0);
+            lg.drawImage(patch, 0, 0);
+            feature(lg, glow, r, th);
+            g.globalAlpha = BACKDROP_DETAIL;
+            g.drawImage(layer, 0, 0);
+            g.globalAlpha = 1;
         },
         seed
     );

@@ -68,7 +68,7 @@ const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const FACE_R = -0.45,
     FACE_L = -Math.PI + 0.45;
 /** Back wall brightness (it sits behind the play, so it stays dimmer than ledges and sprites). */
-const BACKDROP_BRIGHTNESS = 0.55;
+const BACKDROP_BRIGHTNESS = 0.45;
 /** Strength of the back wall's glowing features (glowworm stars, ore veins). */
 const BACKDROP_GLOW = 0.35;
 /** Bloom strength (all glows). Kept modest so the level reads clearly, not hazily. */
