@@ -11,7 +11,9 @@
  *     gets a small brightness jitter so the cubes read individually. Pure, no DOM.
  *   - minerModel(): Pip, with a helmet torch (glowing lens, soft beam and a `lens` / `aim`
  *     pair that view.ts follows with a spotlight).
- *   - guardianModel(kind, style, colour): robot, beetle or slime walkers, bat flyers, drone lifts.
+ *   - guardianModel(kind, n, colour): the creature for a guardian in cavern n, from a roster
+ *     that grows band by band (core/difficulty.ts): slimes, beetles, bats and drones from the
+ *     start; moles from 11; robots and silk-hanging spiders from 21; worms from 31; moths from 41.
  *   - Character.pose(state): moves the joints toward the state's target pose, eased by dt, so
  *     idle → walk → jump → fall blend instead of snapping. Freezes when dt is 0 (paused).
  *
@@ -27,6 +29,7 @@
  */
 import * as THREE from "three";
 import { COLORS } from "../core/palette";
+import { difficulty } from "../core/difficulty";
 
 export const VOX = 1 / 8;
 /** Helmet torch strength: lens glow and beam here, spotlight in view.ts. The miner's halo glow is separate (view.ts MINER_GLOW). */
@@ -46,6 +49,8 @@ export interface PoseState {
     mode: Mode;
     /** Landing squash, 1 on touchdown easing to 0. */
     land: number;
+    /** Model units from the origin up to an anchor above (a spider's silk). */
+    reach?: number;
 }
 export interface Character {
     group: THREE.Group;
@@ -315,11 +320,30 @@ function torchBeam() {
 
 const EYE = COLORS.guardianEye;
 
-export function guardianModel(kind: "walk" | "fly" | "lift", style: number, col: THREE.Color): Character {
-    const c = col.getHex();
-    if (kind === "lift") return drone(c);
-    if (kind === "fly") return bat(c);
-    return [robot, beetle, slime][style % 3](c);
+/**
+ * The creature roster by difficulty band: each band can add a newcomer, so deeper caverns
+ * meet new things. Band 1: slimes and beetles, bats, drones. Moles from cavern 11, spiders
+ * (on silk, as lifts) from 21, worms from 31, moths from 41.
+ */
+const ROSTER: { from: number; kind: "walk" | "fly" | "lift"; make: (c: number) => Character }[] = [
+    { from: 1, kind: "walk", make: slime },
+    { from: 1, kind: "walk", make: beetle },
+    { from: 1, kind: "fly", make: bat },
+    { from: 1, kind: "lift", make: drone },
+    { from: 2, kind: "walk", make: mole },
+    { from: 3, kind: "walk", make: robot },
+    { from: 3, kind: "lift", make: spider },
+    { from: 4, kind: "walk", make: worm },
+    { from: 5, kind: "fly", make: moth },
+];
+
+/** The model for a guardian of `kind` in cavern n: the newest creature its band allows, rotating. */
+export function guardianModel(kind: "walk" | "fly" | "lift", n: number, col: THREE.Color): Character {
+    const band = difficulty(n).band;
+    const pool = ROSTER.filter((e) => e.kind === kind && e.from <= band);
+    // Newest first, so a band's newcomer is the one most often met in that band.
+    const e = pool[pool.length - 1 - (n % pool.length)];
+    return e.make(col.getHex());
 }
 
 function robot(c: number): Character {
@@ -541,6 +565,186 @@ function drone(c: number): Character {
             core.position.y = (5 + Math.sin(s.t * 3) * 0.5) * VOX;
             core.rotation.z = Math.sin(s.t * 1.7) * 0.08;
             core.rotation.y = Math.sin(s.t * 0.8) * 0.4;
+        },
+    };
+}
+
+// ---- Cave creatures (arrive band by band, see core/difficulty.ts) -----------------------------------
+
+function mole(c: number): Character {
+    const dk = shade(c, 0.55),
+        claw = 0xf0d8c8,
+        snout = 0xe8a8a8;
+    const body = part(
+        [
+            [0, 1, 0, 8, 4, 6, c],
+            [1, 5, 1, 6, 1, 4, c],
+            [1, 0, 1, 6, 1, 4, dk],
+            [8, 1, 2, 2, 2, 2, snout],
+            [10, 2, 2, 1, 1, 2, 0xff7a9a, 1.3],
+            [7, 4, 1, 1, 1, 1, EYE, 2.5],
+            [7, 4, 4, 1, 1, 1, EYE, 2.5],
+        ],
+        [-5, 0, -3],
+        [0, 1, 0],
+        { roughness: 0.95 }
+    );
+    // Big digging claws at the front, little feet behind.
+    const claws = [-1, 1].map((side) =>
+        part(
+            [
+                [0, -3, 0, 1, 3, 1, dk],
+                [0, -3, 0, 2, 1, 1, claw],
+            ],
+            [-0.5, 0, -0.5],
+            [2.5, 3.5, side * 3.5]
+        )
+    );
+    const feet = [-1, 1].map((side) => part([[0, -1, 0, 2, 1, 1, dk]], [-1, 0, -0.5], [-3, 1, side * 2.5]));
+    const group = new THREE.Group();
+    group.add(body, ...claws, ...feet);
+    return {
+        group,
+        pose: (s) => {
+            const w = Math.sin(s.phase * 1.4);
+            claws[0].rotation.z = w * 0.7;
+            claws[1].rotation.z = -w * 0.7;
+            feet[0].rotation.z = -w * 0.5;
+            feet[1].rotation.z = w * 0.5;
+            body.rotation.x = w * 0.08;
+            body.position.y = (1 + Math.abs(w) * 0.4) * VOX;
+        },
+    };
+}
+
+function worm(c: number): Character {
+    const dk = shade(c, 0.6);
+    // Rears up toward the head like a cobra; the body is a chain of ringed segments.
+    const SEGS = 5;
+    const segs = Array.from({ length: SEGS }, (_, i) =>
+        part([[0, 0, 0, 2, 3, 3, i % 2 ? dk : c]], [-1, 0, -1.5], [2 - i * 2, 0, 0], { roughness: 0.4 })
+    );
+    const head = part(
+        [
+            [0, 0, 0, 3, 4, 4, c],
+            [2, 2, 0, 1, 1, 1, EYE, 3],
+            [2, 2, 3, 1, 1, 1, EYE, 3],
+            [2, 0, 1, 1, 1, 2, 0x200810],
+        ],
+        [-1.5, 0, -2],
+        [4.5, 0, 0],
+        { roughness: 0.4 }
+    );
+    const group = new THREE.Group();
+    group.add(...segs, head);
+    const rise = (i: number) => Math.max(0, 2 - i) * 2.2;
+    return {
+        group,
+        pose: (s) => {
+            segs.forEach(
+                (g, i) => (g.position.y = (rise(i) + Math.abs(Math.sin(s.phase * 1.2 - i * 0.9)) * 1.5) * VOX)
+            );
+            head.position.y = (rise(-1) + Math.abs(Math.sin(s.phase * 1.2 + 0.9)) * 1.2) * VOX;
+            head.rotation.z = Math.sin(s.t * 3) * 0.15;
+        },
+    };
+}
+
+function spider(c: number): Character {
+    const dk = shade(c, 0.45);
+    const body = part(
+        [
+            [0, 0, 0, 5, 4, 5, c],
+            [1, 4, 2, 3, 1, 1, shade(c, 1.3)],
+            [5, 1, 1, 3, 3, 3, dk],
+            [8, 2, 1, 1, 1, 1, EYE, 3],
+            [8, 2, 3, 1, 1, 1, EYE, 3],
+        ],
+        [-4, 0, -2.5],
+        [0, 5, 0],
+        { roughness: 0.6 }
+    );
+    const legs = [-2.5, -1, 0.5, 2].flatMap((x, i) =>
+        [-1, 1].map((side) => {
+            const l = part(
+                side > 0
+                    ? [
+                          [0, 0, 0, 1, 1, 3, dk],
+                          [0, -4, 2, 1, 4, 1, dk],
+                      ]
+                    : [
+                          [0, 0, -3, 1, 1, 3, dk],
+                          [0, -4, -3, 1, 4, 1, dk],
+                      ],
+                [-0.5, 0, 0],
+                [x, 2, side * 2.5]
+            );
+            l.userData.k = i + (side > 0 ? 0.5 : 0);
+            return l;
+        })
+    );
+    body.add(...legs);
+    // Silk up to the top of its range; its length is set every frame from PoseState.reach.
+    const silkGeo = new THREE.BoxGeometry(0.03, 1, 0.03);
+    silkGeo.translate(0, 0.5, 0);
+    const silk = new THREE.Mesh(
+        silkGeo,
+        new THREE.MeshBasicMaterial({ color: 0xd8d8e0, transparent: true, opacity: 0.55 })
+    );
+    silk.position.y = 9 * VOX;
+    silk.userData.fx = true;
+    const group = new THREE.Group();
+    group.add(body, silk);
+    return {
+        group,
+        pose: (s) => {
+            for (const l of legs) l.rotation.x = Math.sin(s.t * 6 + l.userData.k * 2) * 0.12;
+            body.rotation.y = Math.sin(s.t * 0.9) * 0.5;
+            silk.scale.y = Math.max(0.01, (s.reach ?? 0) - 9 * VOX);
+        },
+    };
+}
+
+function moth(c: number): Character {
+    const dk = shade(c, 0.5),
+        spot = shade(c, 1.5);
+    const body = part(
+        [
+            [0, 0, 0, 5, 3, 3, c],
+            [5, 0, 0, 2, 3, 3, dk],
+            [6, 1, 0, 1, 1, 1, EYE, 3],
+            [6, 1, 2, 1, 1, 1, EYE, 3],
+            [5, 3, 0, 1, 2, 1, dk],
+            [5, 3, 2, 1, 2, 1, dk],
+        ],
+        [-3, 0, -1.5],
+        [0, 7, 0],
+        { roughness: 0.95 }
+    );
+    const wings = [-1, 1].map((side) => {
+        const z = (w: number, at: number) => (side > 0 ? at : -at - w);
+        return part(
+            [
+                [-2, 0, z(3, 0), 6, 1, 3, dk],
+                [-1, 0, z(2, 3), 5, 1, 2, dk],
+                [0, 0, z(1, 5), 3, 1, 1, dk],
+                [0, 0, z(2, 2), 2, 1, 2, spot],
+            ],
+            [0, 0, 0],
+            [0, 9, side * 1.5]
+        );
+    });
+    const group = new THREE.Group();
+    group.add(body, ...wings);
+    return {
+        group,
+        pose: (s) => {
+            const f = Math.sin(s.t * 20) * 0.9;
+            wings[0].rotation.x = f;
+            wings[1].rotation.x = -f;
+            const y = 7 + Math.sin(s.t * 5) * 1;
+            body.position.y = y * VOX;
+            for (const w of wings) w.position.y = (y + 2) * VOX;
         },
     };
 }

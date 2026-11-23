@@ -20,18 +20,20 @@
  *       3. Spikes: on the floor away from the start, and on the middle of long ledges.
  *       4. Start in a bottom corner; the portal on a ledge or the floor, far from the start.
  *       5. Crystals on cells just above segments, at least three cells apart in a row.
- *       6. Guardians: walkers on long ledges, lifts in open columns, a flier deeper down.
+ *       6. Guardians: walkers on long ledges, lifts in open columns, fliers mid-cavern (from
+ *          31); then a few become sprinters (from 41).
  *
  * Usage
  *   core/game.ts: this.cavern = cavernFor(n).
  *
  * Highlights
  *   - Generation is ~1-3 solver runs, typically well under 100 ms.
- *   - Difficulty: air drops from 60 s to 45 s, and guardian count and crumbling rise, over the
- *     first 30 generated caverns; guardian speed is scaled in core/game.ts.
+ *   - Difficulty: every knob (air, crystals, guardian counts, crumble and conveyor odds,
+ *     spikes, pillars, fliers from 31, sprinters from 41) comes from core/difficulty.ts.
  *
  * See also: world/solver.ts, world/caverns.ts (parse, legend), core/random.ts; DESIGN.md "7. Generation".
  */
+import { difficulty, SPRINT } from "../core/difficulty";
 import { rng } from "../core/random";
 import { CAVERNS, parse, type Cavern } from "./caverns";
 import { solve } from "./solver";
@@ -92,8 +94,7 @@ interface Seg {
 }
 
 function build(n: number, r: () => number): Cavern | null {
-    const depth = Math.max(0, n - CAVERNS.length);
-    const hard = Math.min(1, depth / 30);
+    const d = difficulty(n);
     const pick = <T>(a: T[]) => a[Math.floor(r() * a.length)];
     // Inner grid: rows 1..14 of the map → index 0..13, cols 0..29.
     const g = Array.from({ length: 14 }, () => Array<string>(30).fill("."));
@@ -109,7 +110,14 @@ function build(n: number, r: () => number): Cavern | null {
         while (c < 30) {
             const len = 3 + Math.floor(r() * 6);
             const roll = r();
-            const kind = roll < 0.12 + 0.2 * hard ? "~" : roll < 0.3 ? pick(["<", ">"]) : roll < 0.36 ? "#" : "=";
+            const kind =
+                roll < d.crumble
+                    ? "~"
+                    : roll < d.crumble + d.conveyor
+                      ? pick(["<", ">"])
+                      : roll < d.crumble + d.conveyor + 0.06
+                        ? "#"
+                        : "=";
             const c1 = Math.min(29, c + len - 1);
             for (let i = c; i <= c1; i++) set(i, row, kind);
             segs.push({ row, c0: c, c1, kind });
@@ -124,7 +132,7 @@ function build(n: number, r: () => number): Cavern | null {
     const nearStart = (c: number) => Math.abs(c - sc) < 4;
 
     // 2. Pillars of rock hanging under a few segments.
-    for (let i = 0, k = Math.floor(r() * 3); i < k; i++) {
+    for (let i = 0, k = Math.round(d.pillars * (0.5 + 0.5 * r())); i < k; i++) {
         const s = pick(segs);
         const c = s.c0 + Math.floor(r() * (s.c1 - s.c0 + 1));
         if (nearStart(c) || s.row === 12) continue;
@@ -132,12 +140,12 @@ function build(n: number, r: () => number): Cavern | null {
     }
 
     // 3. Spikes.
-    for (let i = 0, k = 1 + Math.floor(r() * (2 + 3 * hard)); i < k; i++) {
+    for (let i = 0; i < d.floorSpikes; i++) {
         const c = 4 + Math.floor(r() * 24);
         if (!nearStart(c)) set(c, 14, "^");
     }
     for (const s of segs)
-        if (s.kind === "=" && s.c1 - s.c0 >= 5 && r() < 0.25 + 0.25 * hard) set((s.c0 + s.c1) >> 1, s.row - 1, "^");
+        if (s.kind === "=" && s.c1 - s.c0 >= 5 && r() < d.ledgeSpikes) set((s.c0 + s.c1) >> 1, s.row - 1, "^");
 
     // 4. Portal: on a ledge (2 × 2 of air above two ledge cells) or on the floor.
     const spots: [number, number][] = [];
@@ -154,7 +162,7 @@ function build(n: number, r: () => number): Cavern | null {
     const portalCell = (c: number, row: number) => c >= pc && c <= pc + 1 && row >= pr && row <= pr + 1;
 
     // 5. Crystals above segments.
-    const want = 6 + Math.floor(r() * (3 + 3 * hard));
+    const want = d.crystals + Math.floor(r() * 2);
     const placed: [number, number][] = [];
     for (let tries = 0; placed.length < want && tries < 200; tries++) {
         const s = pick(segs);
@@ -166,25 +174,31 @@ function build(n: number, r: () => number): Cavern | null {
         placed.push([c, row]);
     }
 
-    // 6. Guardians.
-    const walkers = 1 + Math.min(3, Math.floor(depth / 8));
-    for (const s of segs.filter((s) => s.kind !== "#" && s.c1 - s.c0 >= 4).slice(0, walkers * 3)) {
-        if (r() > 0.4) continue;
+    // 6. Guardians: walkers on long ledges, lifts in open columns, fliers mid-cavern (from 31).
+    const long = segs.filter((s) => s.kind !== "#" && s.c1 - s.c0 >= 4).sort(() => r() - 0.5);
+    for (let placed = 0, i = 0; placed < d.walkers && i < long.length; i++) {
+        const s = long[i];
         const c = s.c0 + 1 + Math.floor(r() * (s.c1 - s.c0 - 1));
-        if (get(c, s.row - 1) === "." && get(c, s.row - 2) === ".") set(c, s.row - 1, pick(["E", "e"]));
+        if (get(c, s.row - 1) === "." && get(c, s.row - 2) === ".") (set(c, s.row - 1, pick(["E", "e"])), placed++);
     }
-    for (let i = 0, k = Math.floor(r() * 2) + (hard > 0.3 ? 1 : 0); i < k; i++) {
+    for (let i = 0; i < d.lifts; i++) {
         const c = 2 + Math.floor(r() * 26);
         const row = 4 + Math.floor(r() * 5);
         if (!nearStart(c) && get(c, row) === "." && get(c, row + 1) === ".") set(c, row, pick(["V", "v"]));
     }
-    if (hard > 0.2 && r() < 0.5) {
-        const c = 3 + Math.floor(r() * 24);
-        if (get(c, 7) === "." && get(c, 6) === "." && get(c, 8) === ".") set(c, 7, "E");
+    for (let i = 0; i < d.fliers; i++) {
+        const c = 3 + Math.floor(r() * 24),
+            row = 6 + Math.floor(r() * 3);
+        if ([row - 1, row, row + 1].every((rr) => get(c, rr) === ".")) set(c, row, pick(["E", "e"]));
     }
 
     const cv = parse({ name: `${pick(ADJ)} ${pick(NOUN)}`, rows: g.map((row) => row.join("")) }, n);
-    cv.air = Math.round(60 - 15 * hard);
+    cv.air = d.air;
+    // Sprinters: a few guardians (seeded) move SPRINT times faster.
+    [...cv.guardians]
+        .sort(() => r() - 0.5)
+        .slice(0, d.sprinters)
+        .forEach((gd) => (gd.speed = SPRINT));
     if (
         cv.guardians.some((gd) => (gd.kind === "lift" ? Math.abs(gd.x / 8 - sc) < 3 : gd.kind !== "walk" && gd.y >= 96))
     )

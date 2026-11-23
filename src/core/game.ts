@@ -26,10 +26,11 @@
  *   - Dying restarts the cavern in full: crystals, crumbled ledges, doors and guardians reset,
  *     as in the classic genre.
  *   - Extra life every 10,000 points. After cavern 20 the run continues into generated caverns.
- *   - Guardian speed rises gently with cavern number, capped at cavern 40.
+ *   - Guardian speed follows the difficulty curve (core/difficulty.ts); sprinters go faster.
  *
  * See also: core/physics.ts, world/generate.ts (cavernFor), render/view.ts; DESIGN.md "8. Rules".
  */
+import { difficulty } from "./difficulty";
 import { cavernFor } from "../world/generate";
 import { W, type Cavern, type Guardian } from "../world/caverns";
 import {
@@ -110,7 +111,7 @@ export class Game {
         return this.acc / TICK;
     }
     get guardianSpeed() {
-        return 0.6 + 0.012 * Math.min(this.n, 40);
+        return difficulty(this.n).guardianSpeed;
     }
 
     /** Load cavern n; `cv` overrides the cavern itself (a restart reuses the current one). */
@@ -216,7 +217,7 @@ export class Game {
             g.px = g.x;
             g.py = g.y;
             const k = g.kind === "lift" ? "y" : "x";
-            g[k] += g.dir * v;
+            g[k] += g.dir * v * (g.speed ?? 1);
             if (g[k] >= g.max) ((g[k] = g.max), (g.dir = -1));
             else if (g[k] <= g.min) ((g[k] = g.min), (g.dir = 1));
         }

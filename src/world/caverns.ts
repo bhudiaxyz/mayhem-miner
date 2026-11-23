@@ -36,6 +36,7 @@
  *
  * See also: core/game.ts (rules), scripts/check.ts (reachability proof); DESIGN.md "4. Caverns".
  */
+import { difficulty } from "../core/difficulty";
 export const W = 32;
 export const H = 16;
 
@@ -48,6 +49,8 @@ export interface Guardian {
     /** Patrol range in px along the moving axis. */
     min: number;
     max: number;
+    /** Speed multiplier (sprinters, generated caverns from 41); 1 when absent. */
+    speed?: number;
 }
 
 export interface Cavern {
@@ -472,7 +475,7 @@ export function parse(def: Def, n: number): Cavern {
     const cv: Cavern = {
         n,
         name: def.name,
-        air: 75 - n,
+        air: 75 - n + difficulty(n).airBonus,
         tiles: "",
         start: { c: 1, r: 14 },
         portal: { c: 28, r: 13 },

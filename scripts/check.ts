@@ -9,7 +9,9 @@
  *   1. Every hand-built cavern parses to 32 × 16, has a start on solid ground, a portal and
  *      crystals, no guardian patrolling the start, and the solver reaches every crystal, every
  *      lever and the portal.
- *   2. Generated caverns 20..59 are deterministic, have at least five crystals, and solve.
+ *   2. Generated caverns 20..109 have at least five crystals and solve. The difficulty curve
+ *      never eases cavern to cavern, saturates at 100, keeps band 1 gentle and steps up each
+ *      band; fliers arrive at 31 and sprinters at 41, never before.
  *   3. Movement: the jump rises 26 px and lands where it started; a six-cell drop is survived
  *      and an eight-cell drop kills; conveyors carry; walking against a belt holds still.
  *   4. Rules: crystals score and open the portal; the portal completes the cavern and air
@@ -29,6 +31,7 @@ import { solve } from "../src/world/solver";
 import { Game } from "../src/core/game";
 import { stepBody, type Body } from "../src/core/physics";
 import { voxelFaces } from "../src/render/characters";
+import { difficulty, MAX_DIFFICULTY_AT, type Difficulty } from "../src/core/difficulty";
 
 const idle = { left: false, right: false, jump: false };
 const left = { left: true, right: false, jump: false };
@@ -67,13 +70,52 @@ for (const cv of CAVERNS) {
 // 2. Generated caverns.
 {
     const t0 = performance.now();
-    for (let n = 20; n < 60; n++) {
+    for (let n = 20; n < 110; n++) {
         const cv = generate(n);
         assert.ok(cv.crystals.length >= 5);
         assert.ok(solve(cv).portal);
         assert.equal(parse({ name: cv.name, rows: rowsOf(cv.tiles) }, n).tiles.length, W * H);
     }
-    console.log(`  generated 20-59 in ${(performance.now() - t0).toFixed(0)} ms (incl. re-solve)`);
+    console.log(`  generated 20-109 in ${(performance.now() - t0).toFixed(0)} ms (incl. re-solve)`);
+}
+
+// 2b. The difficulty curve: bands of ten, never easing, saturating at cavern 100.
+{
+    const harder: (keyof Difficulty)[] = [
+        "t",
+        "guardianSpeed",
+        "crystals",
+        "walkers",
+        "lifts",
+        "fliers",
+        "sprinters",
+        "crumble",
+        "conveyor",
+        "floorSpikes",
+        "ledgeSpikes",
+        "pillars",
+    ];
+    const easier: (keyof Difficulty)[] = ["air", "airBonus"];
+    for (let n = 1; n < MAX_DIFFICULTY_AT + 10; n++) {
+        const a = difficulty(n - 1),
+            b = difficulty(n);
+        for (const k of harder) assert.ok(b[k] >= a[k], `${k} eased at cavern ${n + 1}`);
+        for (const k of easier) assert.ok(b[k] <= a[k], `${k} eased at cavern ${n + 1}`);
+    }
+    assert.deepEqual(difficulty(MAX_DIFFICULTY_AT - 1), difficulty(MAX_DIFFICULTY_AT + 20), "saturates at 100");
+    assert.ok(difficulty(0).guardianSpeed < 0.55 && difficulty(9).t < 0.03, "band 1 stays gentle");
+    const step = difficulty(10).t - difficulty(9).t,
+        creep = difficulty(9).t - difficulty(8).t;
+    assert.ok(step > 4 * creep, "each band is a clear step up");
+    assert.equal(difficulty(0).band, 1);
+    assert.equal(difficulty(10).band, 2);
+    // New mechanics arrive band by band in generated caverns: fliers from 31, sprinters from 41.
+    const flies = (n: number) => generate(n).guardians.some((gd) => gd.kind === "fly");
+    const sprints = (n: number) => generate(n).guardians.some((gd) => (gd.speed ?? 1) > 1);
+    for (let n = 20; n < 30; n++) assert.ok(!flies(n), `no fliers before cavern 31 (${n + 1})`);
+    for (let n = 20; n < 40; n++) assert.ok(!sprints(n), `no sprinters before cavern 41 (${n + 1})`);
+    assert.ok([30, 31, 32, 33, 34].some(flies), "fliers appear in band 4");
+    assert.ok([40, 41, 42, 43, 44].some(sprints), "sprinters appear in band 5");
 }
 
 // 3. Movement.

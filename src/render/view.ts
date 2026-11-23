@@ -274,7 +274,9 @@ export class View {
             const p = gd.kind === "lift" ? y : x;
             v.dist += Math.abs(p - v.last);
             v.last = p;
-            v.pose({ dt, t, phase: v.dist * STRIDE, mode: "walk", land: 0 });
+            // A lift's anchor is the top of its range (a spider's silk runs up to it).
+            const reach = gd.kind === "lift" ? (y - gd.min) / 8 / SPRITE + 2 / SPRITE : 0;
+            v.pose({ dt, t, phase: v.dist * STRIDE, mode: "walk", land: 0, reach });
         });
 
         const m = g.miner;
@@ -594,7 +596,7 @@ export class View {
                 0.5
             );
             const v = guardianModel(gd.kind, n, col);
-            v.group.traverse((o) => (o.castShadow = this.ts.shadowMap > 0));
+            v.group.traverse((o) => (o.castShadow = this.ts.shadowMap > 0 && !o.userData.fx));
             v.group.scale.setScalar(SPRITE);
             if (gd.kind !== "lift") v.group.rotation.y = gd.dir > 0 ? FACE_R : FACE_L;
             this.level.add(v.group, patrolZone(gd, col));

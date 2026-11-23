@@ -24,6 +24,7 @@
  *
  * See also: main.ts (flow), index.html, styles.css; DESIGN.md "10. UI, menus and progress".
  */
+import { bandName } from "../core/difficulty";
 import { cavernFor } from "../world/generate";
 
 export interface MenuItem {
@@ -166,7 +167,8 @@ export const HOWTO = `
 </ol>`;
 
 export function showIntro(n: number, name: string, facts: string) {
-    $("#intro-num").textContent = n < 20 ? `Cavern ${n + 1} of 20` : `Cavern ${n + 1} · uncharted`;
+    $("#intro-num").textContent =
+        `${n < 20 ? `Cavern ${n + 1} of 20` : `Cavern ${n + 1} · uncharted`} · ${bandName(n)}`;
     $("#intro-name").textContent = name;
     $("#intro-facts").textContent = facts;
     const el = $("#intro");
