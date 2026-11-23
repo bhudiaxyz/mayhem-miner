@@ -9,13 +9,13 @@
  *   - seedOf(name): FNV-1a hash of a cavern name, the seed for everything below.
  *   - canvasTex(size, paint, seed): a nearest-filtered, repeating canvas texture.
  *   - rockTexture(style, seed): a 16 × 16 greyscale rock tile (tinted per block instance):
- *     mottled, strata, brick, cobble or crystal.
+ *     mottled, strata, fractured, cobble or crystal.
  *   - backdropTextures(theme, seed): the back wall, 16 px per cell, in three layers:
  *       1. the theme gradient, quantised into flat bands (the copper-bar look);
- *       2. masonry (theme.wall): brick, stone (ashlar), marble, rubble, slab or rough-hewn,
- *          painted as light / dark overlays so the gradient tints it;
+ *       2. natural rock (theme.wall): rock, stone (boulders), rubble, marble, mud or fissured,
+ *          as light / dark overlays so the gradient tints it (no masonry: these are caves);
  *       3. a feature (theme.back): bars (none), strata waves, cave stalactites, glowworm
- *          stars, pipes or ore veins.
+ *          stars, hanging roots or ore veins.
  *     Returns { map, glow }: glow is an emissive map holding only what should shine
  *     (stars, veins), so it glows whatever the lighting.
  *
@@ -95,16 +95,28 @@ const ROCK: Record<RockStyle, (g: Ctx, r: () => number) => void> = {
         }
         speckle(g, r, 25, 120, 230);
     },
-    brick: (g, r) => {
-        g.fillStyle = grey(110);
-        g.fillRect(0, 0, 16, 16);
-        for (let row = 0; row < 2; row++)
-            for (let k = -1; k < 2; k++) {
-                const x = k * 8 + (row ? 4 : 0);
-                g.fillStyle = grey(170 + r() * 70);
-                g.fillRect(x + 1, row * 8 + 1, 7, 6);
+    fractured: (g, r) => {
+        // Angular shards: each pixel takes the shade of its nearest seed; edges between shards darken.
+        const seeds = Array.from({ length: 6 }, () => [r() * 16, r() * 16, 150 + r() * 90]);
+        const near = (x: number, y: number) => {
+            let best = 0,
+                d0 = Infinity;
+            seeds.forEach(([sx, sy], i) => {
+                // Wrapped distance so the tile repeats seamlessly.
+                const dx = Math.min(Math.abs(x - sx), 16 - Math.abs(x - sx)),
+                    dy = Math.min(Math.abs(y - sy), 16 - Math.abs(y - sy)),
+                    d = dx * dx + dy * dy;
+                if (d < d0) ((d0 = d), (best = i));
+            });
+            return best;
+        };
+        for (let y = 0; y < 16; y++)
+            for (let x = 0; x < 16; x++) {
+                const i = near(x, y);
+                const edge = near(x + 1, y) !== i || near(x, y + 1) !== i;
+                g.fillStyle = grey(edge ? seeds[i][2] * 0.55 : seeds[i][2]);
+                g.fillRect(x, y, 1, 1);
             }
-        speckle(g, r, 30, 140, 230);
     },
     cobble: (g, r) => {
         g.fillStyle = grey(90);
@@ -150,50 +162,61 @@ export function rockTexture(style: RockStyle, seed: number) {
 const BW = 512,
     BH = 256;
 
+/** Light or dark overlay of strength k (k < 0 darkens). */
+const tone = (k: number) => (k < 0 ? `rgba(0,0,0,${-k})` : `rgba(255,255,255,${k})`);
+
 function wall(g: Ctx, r: () => number, style: Theme["wall"]) {
-    const mortar = "rgba(0,0,0,0.32)";
-    if (style === "brick") {
-        for (let y = 0, row = 0; y < BH; y += 8, row++)
-            for (let x = row % 2 ? -8 : 0; x < BW; x += 16) {
-                g.fillStyle = shade(r, 0.12);
-                g.fillRect(x, y, 16, 8);
-                g.fillStyle = mortar;
-                g.fillRect(x, y, 16, 1);
-                g.fillRect(x, y, 1, 8);
+    if (style === "stone") {
+        // Natural stone: irregular boulders (Voronoi cells on a 4 px grid, so it stays blocky)
+        // with dark seams between them and a lit upper edge on each.
+        const C = 4,
+            cols = BW / C,
+            rows = BH / C;
+        const seeds = Array.from({ length: 70 }, () => [r() * cols, r() * rows, (r() - 0.5) * 0.3]);
+        const cell = new Int16Array(cols * rows);
+        for (let y = 0; y < rows; y++)
+            for (let x = 0; x < cols; x++) {
+                let best = 0,
+                    d0 = Infinity;
+                for (let i = 0; i < seeds.length; i++) {
+                    const dx = x - seeds[i][0],
+                        dy = (y - seeds[i][1]) * 1.4;
+                    const d = dx * dx + dy * dy;
+                    if (d < d0) ((d0 = d), (best = i));
+                }
+                cell[y * cols + x] = best;
             }
-    } else if (style === "stone") {
-        // Ashlar: courses of random height, blocks of random width.
-        for (let y = 0; y < BH;) {
-            const h = 12 + Math.floor(r() * 4) * 4;
-            for (let x = -Math.floor(r() * 24); x < BW;) {
-                const w = 20 + Math.floor(r() * 8) * 4;
-                g.fillStyle = shade(r, 0.14);
-                g.fillRect(x, y, w, h);
-                g.fillStyle = mortar;
-                g.fillRect(x, y, w, 2);
-                g.fillRect(x, y, 2, h);
-                g.fillStyle = "rgba(255,255,255,0.06)";
-                g.fillRect(x + 2, y + 2, w - 2, 1);
-                x += w;
+        for (let y = 0; y < rows; y++)
+            for (let x = 0; x < cols; x++) {
+                const i = cell[y * cols + x];
+                const seam =
+                    (x + 1 < cols && cell[y * cols + x + 1] !== i) || (y + 1 < rows && cell[(y + 1) * cols + x] !== i);
+                const lip = y > 0 && cell[(y - 1) * cols + x] !== i;
+                g.fillStyle = seam
+                    ? tone(-0.4)
+                    : lip
+                      ? tone(0.1)
+                      : tone(seeds[i][2] < 0 ? seeds[i][2] : seeds[i][2] * 0.6);
+                g.fillRect(x * C, y * C, C, C);
             }
-            y += h;
-        }
     } else if (style === "marble") {
-        for (let y = 0; y < BH; y += 64)
-            for (let x = 0; x < BW; x += 64) {
-                g.fillStyle = shade(r, 0.08);
-                g.fillRect(x, y, 64, 64);
-                g.fillStyle = "rgba(0,0,0,0.2)";
-                g.fillRect(x, y, 64, 1);
-                g.fillRect(x, y, 1, 64);
-            }
-        // Veins: wandering, occasionally forking light lines.
-        for (let i = 0; i < 14; i++) {
+        // Smooth, cloudy rock with wandering, occasionally forking light veins.
+        for (let i = 0; i < 60; i++) {
+            const x = r() * BW,
+                y = r() * BH,
+                rad = 20 + r() * 50;
+            const grad = g.createRadialGradient(x, y, 0, x, y, rad);
+            grad.addColorStop(0, r() < 0.5 ? tone(0.06) : tone(-0.1));
+            grad.addColorStop(1, "rgba(0,0,0,0)");
+            g.fillStyle = grad;
+            g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+        }
+        for (let i = 0; i < 16; i++) {
             let x = r() * BW,
                 y = r() * BH,
                 a = r() * Math.PI * 2;
-            const len = 40 + r() * 120;
-            g.fillStyle = `rgba(255,255,255,${0.08 + r() * 0.12})`;
+            const len = 60 + r() * 160;
+            g.fillStyle = tone(0.06 + r() * 0.1);
             for (let k = 0; k < len; k++) {
                 a += (r() - 0.5) * 0.5;
                 x += Math.cos(a);
@@ -203,7 +226,7 @@ function wall(g: Ctx, r: () => number, style: Theme["wall"]) {
             }
         }
     } else if (style === "rubble") {
-        g.fillStyle = "rgba(0,0,0,0.25)";
+        g.fillStyle = tone(-0.25);
         g.fillRect(0, 0, BW, BH);
         for (let i = 0; i < 900; i++) {
             const x = r() * BW,
@@ -213,29 +236,57 @@ function wall(g: Ctx, r: () => number, style: Theme["wall"]) {
             g.beginPath();
             g.ellipse(x, y, rad, rad * (0.6 + r() * 0.4), r() * 3, 0, Math.PI * 2);
             g.fill();
-            g.fillStyle = "rgba(255,255,255,0.08)";
+            g.fillStyle = tone(0.08);
             g.fillRect(Math.floor(x - rad / 2), Math.floor(y - rad / 2), Math.ceil(rad), 1);
         }
-    } else if (style === "slab") {
-        for (let y = 0; y < BH; y += 48)
-            for (let x = (y / 48) % 2 ? -32 : 0; x < BW; x += 64) {
-                g.fillStyle = shade(r, 0.1);
-                g.fillRect(x, y, 64, 48);
-                g.fillStyle = "rgba(255,255,255,0.12)";
-                g.fillRect(x + 1, y + 1, 62, 2);
-                g.fillRect(x + 1, y + 1, 2, 46);
-                g.fillStyle = "rgba(0,0,0,0.3)";
-                g.fillRect(x, y + 46, 64, 2);
-                g.fillRect(x + 62, y, 2, 48);
-                if (r() < 0.35) crack(g, r, x + 8 + r() * 48, y + 4, 30);
+    } else if (style === "mud") {
+        // Packed mud: dark, soft blotches, seep streaks running down, and embedded pebbles.
+        g.fillStyle = "rgba(20,10,0,0.3)";
+        g.fillRect(0, 0, BW, BH);
+        for (let i = 0; i < 300; i++) {
+            g.fillStyle = shade(r, 0.08);
+            g.beginPath();
+            g.ellipse(r() * BW, r() * BH, 6 + r() * 18, 3 + r() * 8, 0, 0, Math.PI * 2);
+            g.fill();
+        }
+        g.fillStyle = tone(-0.18);
+        for (let i = 0; i < 70; i++)
+            g.fillRect(Math.floor(r() * BW), Math.floor(r() * BH), 2, 10 + Math.floor(r() * 40));
+        for (let i = 0; i < 160; i++) {
+            const x = Math.floor(r() * BW),
+                y = Math.floor(r() * BH);
+            g.fillStyle = tone(0.12);
+            g.fillRect(x, y, 2, 2);
+            g.fillStyle = tone(-0.3);
+            g.fillRect(x, y + 2, 2, 1);
+        }
+    } else if (style === "fissured") {
+        // Solid rock split by long cracks, each with a faint lit lip.
+        for (let i = 0; i < 300; i++) {
+            g.fillStyle = shade(r, 0.08);
+            g.fillRect(Math.floor(r() * BW), Math.floor(r() * BH), 4 + Math.floor(r() * 12), 3 + Math.floor(r() * 8));
+        }
+        for (let i = 0; i < 18; i++) {
+            let x = r() * BW,
+                y = r() * BH,
+                a = r() * Math.PI * 2;
+            for (let k = 0, len = 40 + r() * 140; k < len; k++) {
+                a += (r() - 0.5) * 0.9;
+                x += Math.cos(a) * 1.5;
+                y += Math.sin(a) * 1.5;
+                g.fillStyle = tone(-0.5);
+                g.fillRect(Math.floor(x), Math.floor(y), 2, 2);
+                g.fillStyle = tone(0.07);
+                g.fillRect(Math.floor(x), Math.floor(y) - 1, 2, 1);
             }
+        }
     } else {
-        // Rough-hewn: blotches and short chisel marks, no grid.
+        // Rock: rough-hewn blotches and short chisel marks.
         for (let i = 0; i < 500; i++) {
             g.fillStyle = shade(r, 0.1);
             g.fillRect(Math.floor(r() * BW), Math.floor(r() * BH), 2 + Math.floor(r() * 8), 2 + Math.floor(r() * 6));
         }
-        g.fillStyle = "rgba(0,0,0,0.22)";
+        g.fillStyle = tone(-0.22);
         for (let i = 0; i < 260; i++)
             g.fillRect(Math.floor(r() * BW), Math.floor(r() * BH), 3 + Math.floor(r() * 6), 1);
     }
@@ -306,23 +357,20 @@ function feature(g: Ctx, glow: Ctx, r: () => number, th: Theme) {
             }
         }
         g.globalAlpha = glow.globalAlpha = 1;
-    } else if (th.back === "pipes") {
-        for (let x = 24 + r() * 40; x < BW - 12; x += 70 + r() * 90) {
-            const w = 8 + Math.floor(r() * 3) * 2;
-            const grad = g.createLinearGradient(x, 0, x + w, 0);
-            grad.addColorStop(0, "rgba(20,20,26,0.75)");
-            grad.addColorStop(0.35, "rgba(150,150,160,0.55)");
-            grad.addColorStop(1, "rgba(10,10,14,0.8)");
-            g.fillStyle = grad;
-            g.fillRect(x, 0, w, BH);
-            g.fillStyle = "rgba(0,0,0,0.5)";
-            for (let y = r() * 40; y < BH; y += 36 + r() * 30) g.fillRect(x - 2, y, w + 4, 4);
-        }
-        const y = 60 + r() * 120;
-        g.fillStyle = "rgba(20,20,26,0.6)";
-        g.fillRect(0, y, BW, 8);
-        g.fillStyle = "rgba(200,200,210,0.18)";
-        g.fillRect(0, y + 2, BW, 2);
+    } else if (th.back === "roots") {
+        // Roots hanging from the ceiling: wavering strands that fork and taper as they go down.
+        const strand = (x: number, y: number, len: number, w: number) => {
+            let a = Math.PI / 2;
+            for (let k = 0; k < len; k++) {
+                a += (r() - 0.5) * 0.25 + (Math.PI / 2 - a) * 0.05;
+                x += Math.cos(a);
+                y += Math.sin(a);
+                g.fillStyle = "rgba(30,16,6,0.6)";
+                g.fillRect(Math.floor(x), Math.floor(y), Math.max(1, Math.round(w * (1 - k / len))), 1);
+                if (w > 1.5 && r() < 0.02) strand(x, y, (len - k) * 0.6, w * 0.6);
+            }
+        };
+        for (let x = r() * 30; x < BW; x += 20 + r() * 50) strand(x, 16, 30 + r() * 110, 2 + r() * 3);
     } else if (th.back === "veins") {
         // Ore veins: jagged glowing seams with nuggets along them.
         for (let i = 0; i < 7; i++) {

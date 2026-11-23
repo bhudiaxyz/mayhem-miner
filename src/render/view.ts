@@ -70,7 +70,11 @@ const FACE_R = -0.45,
 /** Back wall brightness (it sits behind the play, so it stays dimmer than ledges and sprites). */
 const BACKDROP_BRIGHTNESS = 0.55;
 /** Strength of the back wall's glowing features (glowworm stars, ore veins). */
-const BACKDROP_GLOW = 0.6;
+const BACKDROP_GLOW = 0.35;
+/** Bloom strength (all glows). Kept modest so the level reads clearly, not hazily. */
+const BLOOM_STRENGTH = 0.45;
+/** HDR strength of the thin glowing strip along every ledge top (1 = just under bloom). */
+const EDGE_GLOW = 1.05;
 /** HDR strength of the floating crystals (bloom picks up anything above 1). */
 const CRYSTAL_GLOW = 2.4 * 0.85;
 /** Seconds a landing squash takes to spring back. */
@@ -168,7 +172,7 @@ export class View {
             ao.blendIntensity = 0.8;
             this.composer.addPass(ao);
         }
-        if (ts.bloom) this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7, 0.4, 0.85));
+        if (ts.bloom) this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), BLOOM_STRENGTH, 0.4, 0.85));
         this.composer.addPass(new OutputPass());
         this.resize();
         // The host's size is set by CSS (on portrait phones it leaves room for the controls).
@@ -484,7 +488,7 @@ export class View {
             if ("#=~<>".includes(tiles[i]) && !"#D".includes(at(i % W, Math.floor(i / W) - 1)) && i >= W) tops.push(i);
         const strips = new THREE.InstancedMesh(
             new THREE.BoxGeometry(1.02, 0.05, 0.05),
-            new THREE.MeshBasicMaterial({ color: hdr(th.glow, 1.5), toneMapped: false }),
+            new THREE.MeshBasicMaterial({ color: hdr(th.glow, EDGE_GLOW), toneMapped: false }),
             Math.max(1, tops.length)
         );
         strips.count = tops.length;

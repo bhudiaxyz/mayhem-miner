@@ -28,11 +28,11 @@
 import * as THREE from "three";
 import { rng } from "./random";
 
-export type RockStyle = "mottled" | "strata" | "brick" | "cobble" | "crystal";
-export type BackStyle = "bars" | "strata" | "cave" | "stars" | "pipes" | "veins";
+export type RockStyle = "mottled" | "strata" | "fractured" | "cobble" | "crystal";
+export type BackStyle = "bars" | "strata" | "cave" | "stars" | "roots" | "veins";
 export type MoteKind = "dust" | "spores" | "embers" | "drips" | "bubbles" | "glints";
-/** Back-wall masonry, painted procedurally (seeded per cavern) under the gradient. */
-export type WallStyle = "brick" | "stone" | "marble" | "rubble" | "slab" | "rough";
+/** Back-wall rock (natural, no masonry), painted procedurally (seeded per cavern) under the gradient. */
+export type WallStyle = "rock" | "stone" | "rubble" | "marble" | "mud" | "fissured";
 
 export interface Theme {
     name: string;
@@ -48,7 +48,7 @@ export interface Theme {
     rockStyle: RockStyle;
     /** What is painted on the back wall over the gradient. */
     back: BackStyle;
-    /** The back wall's masonry. */
+    /** The back wall's natural rock. */
     wall: WallStyle;
     /** Ambient particles drifting through the cavern, and their colour. */
     motes: MoteKind;
@@ -77,25 +77,25 @@ type Row = [
 
 /** Back-wall masonry per hand-built cavern, in cavern order. */
 const WALLS: WallStyle[] = [
-    "brick",
-    "slab",
-    "rough",
-    "rubble",
-    "brick",
-    "rough",
-    "rubble",
-    "rough",
-    "brick",
+    "rock",
     "stone",
-    "rough",
+    "mud",
+    "rubble",
+    "fissured",
+    "mud",
+    "rubble",
+    "stone",
+    "fissured",
+    "mud",
+    "rock",
     "stone",
     "marble",
-    "slab",
+    "mud",
+    "fissured",
+    "rock",
     "stone",
-    "brick",
-    "slab",
     "marble",
-    "rough",
+    "fissured",
     "marble",
 ];
 
@@ -124,7 +124,7 @@ const ROWS: Row[] = [
         0x6a5a48,
         0x7ad7ff,
         ["#030814", "#0b1d3d", "#1f4a7a", "#5a8fc0", "#06101e"],
-        "brick",
+        "fractured",
         "bars",
         "glints",
         0xffe2a0,
@@ -169,8 +169,8 @@ const ROWS: Row[] = [
         0x3a4a5a,
         0xffc040,
         ["#08080a", "#1c1a1e", "#3a3036", "#6a5040", "#0c0a0c"],
-        "brick",
-        "pipes",
+        "fractured",
+        "roots",
         "dust",
         0xffe0b0,
         0xfff0d8,
@@ -229,8 +229,8 @@ const ROWS: Row[] = [
         0x4a5a5a,
         0xff7a3d,
         ["#140404", "#3d0a0a", "#801f12", "#d65a1f", "#1a0606"],
-        "brick",
-        "pipes",
+        "fractured",
+        "roots",
         "embers",
         0xff8a3a,
         0xffc0a0,
@@ -319,7 +319,7 @@ const ROWS: Row[] = [
         0x5a6a4a,
         0xff9a6a,
         ["#06030a", "#1a0e24", "#3e1e3e", "#8a3e4a", "#0a0610"],
-        "brick",
+        "fractured",
         "cave",
         "dust",
         0xd0b0c0,
@@ -334,8 +334,8 @@ const ROWS: Row[] = [
         0x4a4a52,
         0xffa020,
         ["#100400", "#3a1000", "#8a3000", "#ff8a10", "#160600"],
-        "brick",
-        "pipes",
+        "fractured",
+        "roots",
         "embers",
         0xffb040,
         0xffd090,
@@ -349,8 +349,8 @@ const ROWS: Row[] = [
         0x3a4a5a,
         0xffd06a,
         ["#0a0804", "#221a0c", "#4a3a18", "#9a7a30", "#0e0a06"],
-        "brick",
-        "pipes",
+        "fractured",
+        "roots",
         "dust",
         0xffe8a0,
         0xfff0c0,
@@ -422,10 +422,10 @@ export const THEMES: Theme[] = ROWS.map(
     })
 );
 
-const ROCK_STYLES: RockStyle[] = ["mottled", "strata", "brick", "cobble", "crystal"];
-const BACK_STYLES: BackStyle[] = ["bars", "strata", "cave", "stars", "pipes", "veins"];
+const ROCK_STYLES: RockStyle[] = ["mottled", "strata", "fractured", "cobble", "crystal"];
+const BACK_STYLES: BackStyle[] = ["bars", "strata", "cave", "stars", "roots", "veins"];
 const MOTES: MoteKind[] = ["dust", "spores", "embers", "drips", "bubbles", "glints"];
-const WALL_STYLES: WallStyle[] = ["brick", "stone", "marble", "rubble", "slab", "rough"];
+const WALL_STYLES: WallStyle[] = ["rock", "stone", "rubble", "marble", "mud", "fissured"];
 
 /** A seeded theme for generated caverns (n ≥ 20): its own hue, styles and motes. */
 function generatedTheme(n: number): Theme {

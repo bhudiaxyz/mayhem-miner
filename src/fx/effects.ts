@@ -31,11 +31,11 @@ import type { MoteKind } from "../core/palette";
 /** Per mote kind: speed range (world units/s, + is up), sideways wobble, brightness. */
 const MOTE: Record<MoteKind, { vy: [number, number]; vx: number; wobble: number; k: number }> = {
     dust: { vy: [-0.03, 0.03], vx: 0.18, wobble: 0.1, k: 0.35 },
-    spores: { vy: [0.12, 0.3], vx: 0.03, wobble: 0.25, k: 1.3 },
-    embers: { vy: [0.6, 1.2], vx: 0.1, wobble: 0.35, k: 1.8 },
-    drips: { vy: [-4.5, -3], vx: 0, wobble: 0, k: 0.7 },
+    spores: { vy: [0.12, 0.3], vx: 0.03, wobble: 0.25, k: 0.8 },
+    embers: { vy: [0.6, 1.2], vx: 0.1, wobble: 0.35, k: 1.1 },
+    drips: { vy: [-4.5, -3], vx: 0, wobble: 0, k: 0.5 },
     bubbles: { vy: [0.35, 0.7], vx: 0.02, wobble: 0.2, k: 0.6 },
-    glints: { vy: [-0.02, 0.02], vx: 0.02, wobble: 0.05, k: 1.5 },
+    glints: { vy: [-0.02, 0.02], vx: 0.02, wobble: 0.05, k: 0.9 },
 };
 /** Cavern interior bounds for wrapping motes (inside the border rock). */
 const MX0 = 1,
