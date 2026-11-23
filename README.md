@@ -6,27 +6,27 @@ The game is a homage to the early-1980s single-screen platformers, chiefly Matth
 
 ## Highlights
 
-- **Twenty hand-built caverns**, each one screen in size, each with its own name, layout and colour theme.
+- **Twenty hand-built caverns**, each one screen in size, each with its own name, layout and look: its own colours, rock, back wall (stone, rubble, marble, mud and more), cave features and drifting dust, spores, embers or drips. Generated caverns get their own seeded looks too.
 - **Endless generated caverns** after the twentieth. A procedural generator builds each one and a built-in solver proves every crystal and the portal can be reached before you see it.
 - **Air is the clock**: the tank drains steadily, and whatever is left when you reach the portal is paid out as bonus points.
 - **Classic platforming rules**: a fixed-arc jump you commit to, one-way ledges you jump up through, and falls that kill if they're too long.
 - **Cavern hazards**: crumbling ledges, conveyor belts, spikes, and levers that open sealed doors.
-- **Guardians** on fixed patrols: walkers that pace their ledges, fliers that sweep the cavern, and lifts that rise and fall in shafts.
-- **Voxel look with an Amiga accent**: chunky 3D blocks, glowing crystals with bloom, copper-bar backdrops and a lamp that lights the rock as you move.
+- **Guardians** on fixed patrols: walkers that pace their ledges, fliers that sweep the cavern, and lifts that rise and fall in shafts. Every character is built from voxel cubes and fully rigged: walking, idling, jumping and falling all animate.
+- **Voxel look with an Amiga accent**: chunky 3D blocks, glowing crystals with bloom and a blocky halo when you grab one, copper-bar gradients on the cave walls, and a helmet torch that lights the way ahead.
 - **Synthesised sound and music**: every effect and a chiptune soundtrack, which speeds up as your air runs low, are generated live with WebAudio. There are no audio files.
 - **Extra life every 10,000 points**, a saved best score, and Continue from the deepest cavern you've reached.
 - **Desktop, tablet and phone alike**: keyboard, touch or gamepad, in either orientation. On touch screens the controls get their own strip or side gutters, so your thumbs never cover the cavern. Rendering quality adapts to the device (override with `?tier=high|mobile-high|mid|low`).
 
 ## Controls
 
-| Action         | Keyboard                       | Touch                  | Gamepad                |
-| -------------- | ------------------------------ | ---------------------- | ---------------------- |
-| Walk           | ← → · A D · O P                | Joystick ◀ ▶           | Left stick · d-pad ← → |
-| Jump           | Space · ↑ · W (hold to repeat) | ▲, or joystick up      | A · B · d-pad ↑        |
-| Pause / resume | Esc                            | ❚❚                     | Start                  |
-| Sound on / off | M                              | Pause menu             | Pause menu             |
-| Restart cavern | R (while paused)               | Pause menu             | Pause menu             |
-| Menus          | Arrows · Enter · Esc           | Tap                    | D-pad or stick · A · B |
+| Action         | Keyboard                       | Touch             | Gamepad                |
+| -------------- | ------------------------------ | ----------------- | ---------------------- |
+| Walk           | ← → · A D · O P                | Joystick ◀ ▶      | Left stick · d-pad ← → |
+| Jump           | Space · ↑ · W (hold to repeat) | ▲, or joystick up | A · B · d-pad ↑        |
+| Pause / resume | Esc                            | ❚❚                | Start                  |
+| Sound on / off | M                              | Pause menu        | Pause menu             |
+| Restart cavern | R (while paused)               | Pause menu        | Pause menu             |
+| Menus          | Arrows · Enter · Esc           | Tap               | D-pad or stick · A · B |
 
 Choose the jump direction before you take off: once you're in the air the arc is fixed.
 

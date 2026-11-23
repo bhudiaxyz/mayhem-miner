@@ -58,7 +58,7 @@ src/
   core/
     game.ts             rules: cavern state, air, crystals, guardians, lives, score, phases (pure)
     physics.ts          miner movement: walk, jump table, fall, landing, overlap tests (pure)
-    palette.ts          every colour: 12 cavern themes, sprite colours, UI colours → CSS variables
+    palette.ts          every colour: a theme per cavern (+ seeded ones), sprite colours, UI colours
     random.ts           the shared seeded PRNG, mulberry32 (pure)
     save.ts             localStorage: best score, deepest cavern reached, help seen
   world/
@@ -70,9 +70,10 @@ src/
   render/
     view.ts             three.js scene: voxel cavern, crystals, portal, lights, post-FX
     characters.ts       voxel miner + guardians: part builder, joints, poses, helmet torch
+    paint.ts            procedural canvas textures: rock tiles and the layered back wall
     tier.ts             GPU classification + per-tier quality table
   fx/
-    effects.ts          pooled additive sparks
+    effects.ts          pooled additive sparks, voxel pickup halos, ambient motes
     audio.ts            WebAudio effects and the procedural chiptune
   ui/
     hud.ts              HUD writer (DOM writes only on change)
@@ -287,7 +288,7 @@ Guardians keep moving in every phase, so the cavern stays alive behind dialogs. 
 - A **patrol zone** per guardian: a faint plane in its colour on the back wall over the box it sweeps, so routes can be planned at a glance.
 - The **backdrop** plane behind everything (§11).
 
-Textures are 16 × 16 greyscale pixel-art tiles painted at start-up into canvases (`textures()`: mottled rock, planked ledge, cracked crumble, chevron belt, banded door). They use nearest filtering with no mipmaps and are tinted per instance, so there are no image files. Each texture is also its material's `bumpMap`, so the grit reacts to the lamp. The two belt directions get their own clone of the belt texture so they can scroll opposite ways.
+Textures are 16 × 16 greyscale pixel-art tiles painted into canvases: the ledge, crumble, belt and door tiles once at start-up (`textures()`), and the rock tile per cavern in its theme's style (`rockTexture`, §11). They use nearest filtering with no mipmaps and are tinted per instance, so there are no image files. Each texture is also its material's `bumpMap`, so the grit reacts to the lamp. The two belt directions get their own clone of the belt texture so they can scroll opposite ways.
 
 ### 9.3 Models
 
@@ -323,6 +324,8 @@ Guardian colours are an HSL hue stepped by cavern (`n · 0.137`), offset per gua
 ### 9.5 Effects
 
 `Effects` is one additive `Points` layer over a fixed pool (200–600 sparks by tier). `burst()` adds sparks with random direction and speed, and a full pool overwrites random slots. Each frame `update()` integrates gravity, fades colour by remaining life, and **compacts** live sparks to the front so the draw range is exactly the live set. main.ts fires bursts for crystals (in the crystal's colour), the portal opening, deaths (helmet yellow and overall blue), crumbles, and a little low-gravity dust on every jump and landing. There is no per-frame allocation.
+
+**Ambient motes** are a second additive `Points` layer that persists for the cavern: `motes(kind, colour, count)` scatters them, and each kind moves its own way. Dust drifts sideways, spores and bubbles rise with a wobble, embers rise fast and flicker, drips fall, and glints hang and twinkle. They wrap inside the border rock. The count is the tier's particle budget / 8 (25 to 75).
 
 ### 9.6 Post-processing
 
@@ -365,8 +368,22 @@ Button size is `--btn`: `clamp(60px, 11vmax, 96px)` in portrait and `clamp(56px,
 
 All colours live here; the only exceptions are the pre-JS splash background in `index.html` and the icon SVG.
 
-- **12 cavern themes** (`THEMES`: Umber, Slate, Moss, Rust, Amethyst, Sandstone, Glacier, Ember, Verdigris, Coal, Rose, Indigo); cavern `n` uses `THEMES[n % 12]`. Each has `rock`, `ledge`, `crumble` and `belt` tints, a `glow` accent for edge strips and the open portal, and five **copper-bar stops** (`bars`).
-- **Copper bars**: on the Amiga, the copper co-processor could change palette registers on every scan line, giving the platform its signature horizontal colour gradients. `backdrop()` recreates the look: a vertical gradient through the theme's stops, **quantised into 4-pixel bands** of flat colour, with faint brickwork drawn over it at 28% black.
+- **A theme per cavern.** Each of the twenty hand-built caverns has its own theme in `THEMES`, chosen to suit its name (The Pithead is warm umber with drifting dust, Glowworm Grotto is near-black blue with glowworm stars, The Crucible is ember red with rising sparks). Generated caverns get `generatedTheme(n)`: a seeded theme whose hue steps by the golden ratio, so neighbouring caverns sit far apart on the colour wheel, with randomly picked styles. `themeFor(n)` returns one or the other. (HSL is converted with `SRGBColorSpace`; three.js's default would read it as linear and wash the colours out.)
+- **What a theme sets**:
+
+    | Field                           | Effect                                                                                                   |
+    | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
+    | `rock` `ledge` `crumble` `belt` | block tints                                                                                              |
+    | `glow`                          | ledge edge strips, the open portal and its light, ore veins                                              |
+    | `bars`                          | five back-wall gradient stops, top to bottom                                                             |
+    | `rockStyle`                     | rock tile pattern: mottled, strata, fractured, cobble or crystal                                         |
+    | `wall`                          | back-wall rock: rock, stone (boulders), rubble, marble, mud or fissured                                  |
+    | `back`                          | back-wall feature: bars (none), strata waves, cave stalactites, glowworm stars, hanging roots, ore veins |
+    | `motes` / `mote`                | ambient particles and their colour: dust, spores, embers, drips, bubbles or glints                       |
+    | `sky` / `ground`                | hemisphere light tints from above and below                                                              |
+
+- **The back wall** (`render/paint.ts`, `backdropTextures`) is painted at 16 px a cell in three layers. (1) The theme gradient, **quantised into 8 px bands** of flat colour (the Amiga copper-bar look: its copper co-processor changed palette registers every scan line) and desaturated to `BACKDROP_SATURATION` (0.65). (2) Natural rock in the theme's `wall` style, **mottled with soft patches of a second style**, all as light and dark overlays so the gradient tints it. There is no masonry: these are caves. (3) The `back` feature. Layers 2 and 3 are blended in at `BACKDROP_DETAIL` (0.45), and the wall material is dimmed to `BACKDROP_BRIGHTNESS` (0.45, view.ts). **The wall must always stay pale and dull** so the level in front of it is the focus. Glowing features (stars, veins) also go to an emissive map, shown at `BACKDROP_GLOW` (0.35).
+- **Seeded by name.** Every painted texture (rock tile, back wall, mottling) is seeded from `seedOf(cavern.name)`, an FNV-1a hash, so a cavern looks the same on every visit. The rock and back-wall textures are rebuilt and disposed with each cavern.
 - **Fixed colours** (`COLORS`): the miner's overalls, shirt, skin, helmet, boots and lamp; spikes; lever; door; closed portal; guardian eyes; the five-colour `crystalCycle`; UI colours.
 - `hdr(hex, k)` returns a linear colour × k for bloom materials. `applyUiColors()` writes `COLORS.ui` into CSS custom properties at start-up; `styles.css` keeps the same values as fallbacks and derives tints with `color-mix()`.
 
@@ -470,29 +487,37 @@ npm run preview    # serve dist/ (then: python scripts/smoke.py)
 
 ## 18. Tuning reference
 
-| Constant          | Where               | Value                    | Effect                                    |
-| ----------------- | ------------------- | ------------------------ | ----------------------------------------- |
-| `TICK`            | `core/physics.ts`   | 1/40 s                   | simulation rate                           |
-| walk speed        | `stepBody`          | 1 px/tick (5 cells/s)    | also conveyor speed                       |
-| `JUMP`            | `core/physics.ts`   | 24 ticks, 26 px high     | jump height, length and timing            |
-| `FALL_SPEED`      | `core/physics.ts`   | 4 px/tick                | straight fall speed                       |
-| `FALL_LIMIT`      | `core/physics.ts`   | 48 px (6 cells)          | longest survivable fall, from the apex    |
-| `CRUMBLE_TICKS`   | `core/game.ts`      | 28 ticks (0.7 s)         | how long a crumbling cell holds you       |
-| `guardianSpeed`   | `core/game.ts`      | 0.6 + 0.012 · min(n, 40) | guardian px/tick                          |
-| air               | `parse`, `generate` | 75 − n s; 60 → 45 s      | hand-built; generated                     |
-| `CRYSTAL_POINTS`  | `core/game.ts`      | 100                      | per crystal                               |
-| `AIR_POINTS`      | `core/game.ts`      | 20                       | per second of air left                    |
-| `EXTRA_LIFE`      | `core/game.ts`      | 10,000                   | points per extra life                     |
-| `START_LIVES`     | `core/game.ts`      | 3                        | lives per run                             |
-| `DEAD_PAUSE`      | `core/game.ts`      | 1.6 s                    | before the cavern restarts                |
-| `TUMBLE`          | `render/view.ts`    | 0.8 s                    | death tumble before the miner vanishes    |
-| jump buffer       | `player/input.ts`   | 100 ms                   | early jump taps still count on landing    |
-| `BANDS`           | `world/generate.ts` | rows 12, 9, 6, 3         | generated ledge bands (one jump apart)    |
-| `ATTRACT_SECONDS` | `main.ts`           | 6 s                      | title-screen cavern cycle                 |
-| bloom             | `render/view.ts`    | 0.7 / 0.4 / 0.85         | strength / radius / threshold             |
-| `FOV`             | `render/view.ts`    | 30°                      | camera field of view                      |
-| `SPRITE`          | `render/view.ts`    | 0.75                     | drawn size of miner, guardians, crystals  |
-| `HIT_TOP`         | `core/physics.ts`   | 4 px                     | touch hitbox trimmed to match the sprites |
+| Constant              | Where                  | Value                              | Effect                                    |
+| --------------------- | ---------------------- | ---------------------------------- | ----------------------------------------- |
+| `TICK`                | `core/physics.ts`      | 1/40 s                             | simulation rate                           |
+| walk speed            | `stepBody`             | 1 px/tick (5 cells/s)              | also conveyor speed                       |
+| `JUMP`                | `core/physics.ts`      | 24 ticks, 26 px high               | jump height, length and timing            |
+| `FALL_SPEED`          | `core/physics.ts`      | 4 px/tick                          | straight fall speed                       |
+| `FALL_LIMIT`          | `core/physics.ts`      | 48 px (6 cells)                    | longest survivable fall, from the apex    |
+| `CRUMBLE_TICKS`       | `core/game.ts`         | 28 ticks (0.7 s)                   | how long a crumbling cell holds you       |
+| `guardianSpeed`       | `core/game.ts`         | 0.6 + 0.012 · min(n, 40)           | guardian px/tick                          |
+| air                   | `parse`, `generate`    | 75 − n s; 60 → 45 s                | hand-built; generated                     |
+| `CRYSTAL_POINTS`      | `core/game.ts`         | 100                                | per crystal                               |
+| `AIR_POINTS`          | `core/game.ts`         | 20                                 | per second of air left                    |
+| `EXTRA_LIFE`          | `core/game.ts`         | 10,000                             | points per extra life                     |
+| `START_LIVES`         | `core/game.ts`         | 3                                  | lives per run                             |
+| `DEAD_PAUSE`          | `core/game.ts`         | 1.6 s                              | before the cavern restarts                |
+| `TUMBLE`              | `render/view.ts`       | 0.8 s                              | death tumble before the miner vanishes    |
+| jump buffer           | `player/input.ts`      | 100 ms                             | early jump taps still count on landing    |
+| `BANDS`               | `world/generate.ts`    | rows 12, 9, 6, 3                   | generated ledge bands (one jump apart)    |
+| `ATTRACT_SECONDS`     | `main.ts`              | 6 s                                | title-screen cavern cycle                 |
+| bloom                 | `render/view.ts`       | `BLOOM_STRENGTH` 0.45 / 0.4 / 0.85 | strength / radius / threshold             |
+| `EDGE_GLOW`           | `render/view.ts`       | 1.05                               | ledge edge strip HDR strength             |
+| `CRYSTAL_GLOW`        | `render/view.ts`       | 2.4 × 0.85                         | crystal HDR strength                      |
+| `MINER_GLOW`          | `render/view.ts`       | 0.75                               | warm halo light around the miner          |
+| `TORCH_GLOW`          | `render/characters.ts` | 1                                  | helmet torch: spotlight, beam and lens    |
+| `BACKDROP_BRIGHTNESS` | `render/view.ts`       | 0.45                               | back wall brightness                      |
+| `BACKDROP_GLOW`       | `render/view.ts`       | 0.35                               | glowworms / veins on the back wall        |
+| `BACKDROP_DETAIL`     | `render/paint.ts`      | 0.45                               | strength of back-wall rock and features   |
+| `BACKDROP_SATURATION` | `render/paint.ts`      | 0.65                               | back-wall gradient saturation             |
+| `FOV`                 | `render/view.ts`       | 30°                                | camera field of view                      |
+| `SPRITE`              | `render/view.ts`       | 0.75                               | drawn size of miner, guardians, crystals  |
+| `HIT_TOP`             | `core/physics.ts`      | 4 px                               | touch hitbox trimmed to match the sprites |
 
 ## 19. Known limits and extension points
 
