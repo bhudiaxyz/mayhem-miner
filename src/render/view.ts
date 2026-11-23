@@ -51,6 +51,7 @@ import { rng } from "../core/random";
 import { H, W, type Cavern, type Guardian } from "../world/caverns";
 import { Effects } from "../fx/effects";
 import type { TierSettings } from "./tier";
+import { backdropTextures, canvasTex, rockTexture, seedOf } from "./paint";
 import { guardianModel, minerModel, TORCH_GLOW, type Character, type Miner, type Mode } from "./characters";
 
 const DEPTH = 1.2; // block depth (z)
@@ -66,6 +67,10 @@ const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)").matches;
 /** Facing angles: a turn eases from one to the other through facing the camera. */
 const FACE_R = -0.45,
     FACE_L = -Math.PI + 0.45;
+/** Back wall brightness (it sits behind the play, so it stays dimmer than ledges and sprites). */
+const BACKDROP_BRIGHTNESS = 0.7;
+/** Strength of the back wall's glowing features (glowworm stars, ore veins). */
+const BACKDROP_GLOW = 0.6;
 /** HDR strength of the floating crystals (bloom picks up anything above 1). */
 const CRYSTAL_GLOW = 2.4 * 0.85;
 /** Seconds a landing squash takes to spring back. */
@@ -93,6 +98,10 @@ export class View {
     private level = new THREE.Group();
     private built: Cavern | null = null;
     private tex = textures();
+    /** Ambient fill, tinted per cavern theme (sky from above, ground from below). */
+    private hemi = new THREE.HemisphereLight(0xc8d4ff, 0x40302a, 1.5);
+    /** Textures painted for the current cavern (rock, back wall), disposed on the next build. */
+    private cavernTex: THREE.Texture[] = [];
     // Per-cavern handles, set by build().
     private crumble!: THREE.InstancedMesh;
     private crumbleCells: number[] = [];
@@ -123,7 +132,7 @@ export class View {
         host.append(this.renderer.domElement);
 
         this.scene.background = new THREE.Color(COLORS.ui.bg);
-        this.scene.add(new THREE.HemisphereLight(0xc8d4ff, 0x40302a, 1.5));
+        this.scene.add(this.hemi);
         this.key.position.set(10, 24, 22);
         this.key.target.position.set(16, 8, 0);
         if (ts.shadowMap) {
@@ -353,7 +362,16 @@ export class View {
         this.level.clear();
         for (const b of this.belts) b.dispose();
         this.belts = [];
+        for (const t of this.cavernTex) t.dispose();
         const th = (this.theme = themeFor(n));
+        // Seeded by name, so a cavern's surfaces are the same every visit.
+        const seed = seedOf(cv.name);
+        const rockTex = rockTexture(th.rockStyle, seed);
+        const backTex = backdropTextures(th, seed);
+        this.cavernTex = [rockTex, backTex.map, backTex.glow];
+        this.hemi.color.setHex(th.sky);
+        this.hemi.groundColor.setHex(th.ground);
+        this.effects.motes(th.motes, th.mote, Math.round(this.ts.particles / 8));
         const tiles = cv.tiles;
         const at = (c: number, r: number) => (c < 0 || c >= W || r < 0 || r >= H ? "#" : tiles[r * W + c]);
         const cells = (ch: string) => {
@@ -367,7 +385,14 @@ export class View {
         // Backdrop: copper bars and faint brickwork, plus a dark surround for wide screens.
         const back = new THREE.Mesh(
             new THREE.PlaneGeometry(W, H),
-            new THREE.MeshStandardMaterial({ map: backdrop(th), roughness: 1 })
+            new THREE.MeshStandardMaterial({
+                map: backTex.map,
+                color: new THREE.Color().setScalar(BACKDROP_BRIGHTNESS),
+                emissive: 0xffffff,
+                emissiveMap: backTex.glow,
+                emissiveIntensity: BACKDROP_GLOW,
+                roughness: 1,
+            })
         );
         back.position.set(W / 2, H / 2, -DEPTH / 2 - 0.02);
         back.receiveShadow = this.ts.shadowMap > 0;
@@ -392,8 +417,8 @@ export class View {
             cells("#"),
             cube,
             new THREE.MeshStandardMaterial({
-                map: this.tex.rock,
-                bumpMap: this.tex.rock,
+                map: rockTex,
+                bumpMap: rockTex,
                 bumpScale: 2,
                 roughness: 0.9,
             }),
@@ -602,19 +627,6 @@ function box(w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0,
 // ---- Textures -----------------------------------------------------------------------------------
 // Tiny greyscale pixel-art tiles, tinted per instance; nearest filtering keeps them crisp.
 
-function canvasTex(size: number, paint: (g: CanvasRenderingContext2D, r: () => number) => void, seed: number) {
-    const c = document.createElement("canvas");
-    c.width = c.height = size;
-    paint(c.getContext("2d")!, rng(seed));
-    const t = new THREE.CanvasTexture(c);
-    t.magFilter = THREE.NearestFilter;
-    t.minFilter = THREE.NearestFilter;
-    t.generateMipmaps = false;
-    t.colorSpace = THREE.SRGBColorSpace;
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    return t;
-}
-
 function textures() {
     const speckle = (g: CanvasRenderingContext2D, r: () => number, n: number, lo: number, hi: number) => {
         for (let i = 0; i < n; i++) {
@@ -632,22 +644,6 @@ function textures() {
         g.fillRect(15, 0, 1, 16);
     };
     return {
-        rock: canvasTex(
-            16,
-            (g, r) => {
-                g.fillStyle = "#c8c8c8";
-                g.fillRect(0, 0, 16, 16);
-                // Mottled stone: soft 2 × 2 blotches, then fine grit.
-                for (let i = 0; i < 14; i++) {
-                    const v = Math.floor(140 + r() * 90);
-                    g.fillStyle = `rgb(${v},${v},${v})`;
-                    g.fillRect(Math.floor(r() * 15), Math.floor(r() * 15), 2, 2);
-                }
-                speckle(g, r, 50, 150, 235);
-                bevel(g);
-            },
-            4242
-        ),
         ledge: canvasTex(
             16,
             (g, r) => {
@@ -701,31 +697,4 @@ function textures() {
             4246
         ),
     };
-}
-
-/** Copper bars (banded vertical gradient) with faint brickwork over it. */
-function backdrop(th: Theme) {
-    const c = document.createElement("canvas");
-    c.width = 256;
-    c.height = 128;
-    const g = c.getContext("2d")!;
-    const grad = g.createLinearGradient(0, 0, 0, 128);
-    th.bars.forEach((s, i) => grad.addColorStop(i / (th.bars.length - 1), s));
-    g.fillStyle = grad;
-    g.fillRect(0, 0, 256, 128);
-    // Quantise into bands, the copper-list look: each band is one flat colour.
-    const img = g.getImageData(0, 0, 1, 128).data;
-    for (let y = 0; y < 128; y += 4) {
-        g.fillStyle = `rgb(${img[y * 4]},${img[y * 4 + 1]},${img[y * 4 + 2]})`;
-        g.fillRect(0, y, 256, 4);
-    }
-    g.fillStyle = "rgba(0,0,0,0.28)";
-    for (let y = 0; y < 128; y += 8) {
-        g.fillRect(0, y, 256, 1);
-        for (let x = (y / 8) % 2 ? 4 : 0; x < 256; x += 8) g.fillRect(x, y, 1, 8);
-    }
-    const t = new THREE.CanvasTexture(c);
-    t.magFilter = THREE.NearestFilter;
-    t.colorSpace = THREE.SRGBColorSpace;
-    return t;
 }
