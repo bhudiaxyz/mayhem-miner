@@ -1,13 +1,13 @@
 /**
- * Preview — an animated turntable of the miner or a creature, for the How to play sheet.
+ * Preview — an animated turntable of the miner, a creature or an obstacle, for How to play.
  *
  * Purpose
  *   Shows each character moving, so players recognise it in a cavern.
  *
  * Operations
- *   - animatePreviews(root): animates every canvas[data-creature] under root ("miner" or a
+ *   - animatePreviews(root): animates every canvas[data-preview] under root ("miner", a PROPS id or a
  *     CREATURES id) with ONE small WebGL renderer. Each frame it reads the canvas's current
- *     data-creature (so the Help carousel just changes the attribute), poses that model (walk
+ *     data-preview (so a Help carousel just changes the attribute), poses that model (walk
  *     cycle), turns it slowly, renders and copies the image into the canvas. Models are built
  *     on first view and cached. Returns stop(), which ends the loop and frees the renderer,
  *     models and GPU context.
@@ -23,11 +23,12 @@
  */
 import * as THREE from "three";
 import { CREATURES, minerModel, type Character } from "./characters";
+import { propModel, PROPS, type PropId } from "./props";
 
 const SIZE = 192;
 
 export function animatePreviews(root: HTMLElement): () => void {
-    const canvases = [...root.querySelectorAll<HTMLCanvasElement>("canvas[data-creature]")];
+    const canvases = [...root.querySelectorAll<HTMLCanvasElement>("canvas[data-preview]")];
     if (!canvases.length) return () => {};
     let renderer: THREE.WebGLRenderer;
     try {
@@ -52,7 +53,7 @@ export function animatePreviews(root: HTMLElement): () => void {
         let m = models.get(id);
         if (!m) {
             const c = CREATURES.find((e) => e.id === id);
-            m = c ? c.make(c.preview) : minerModel();
+            m = c ? c.make(c.preview) : PROPS.includes(id as PropId) ? propModel(id as PropId) : minerModel();
             m.group.visible = false;
             scene.add(m.group);
             models.set(id, m);
@@ -70,7 +71,7 @@ export function animatePreviews(root: HTMLElement): () => void {
         last = now;
         t += dt;
         for (const cv of canvases) {
-            const m = modelFor(cv.dataset.creature ?? "miner");
+            const m = modelFor(cv.dataset.preview ?? "miner");
             m.group.visible = true;
             m.group.rotation.y = -0.45 + Math.sin(t * 0.6) * 0.7;
             m.pose({ dt, t, phase: t * 5, mode: "walk", land: 0, reach: 1.4 });
@@ -90,7 +91,15 @@ export function animatePreviews(root: HTMLElement): () => void {
             const mesh = o as THREE.Mesh;
             mesh.geometry?.dispose();
             const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-            if (mat) for (const mm of Array.isArray(mat) ? mat : [mat]) mm.dispose();
+            if (mat)
+                for (const mm of Array.isArray(mat) ? mat : [mat]) {
+                    for (const t of [
+                        (mm as THREE.MeshStandardMaterial).map,
+                        (mm as THREE.MeshStandardMaterial).bumpMap,
+                    ])
+                        t?.dispose();
+                    mm.dispose();
+                }
         });
         renderer.dispose();
         renderer.forceContextLoss();

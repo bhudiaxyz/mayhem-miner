@@ -44,7 +44,6 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { CRUMBLE_TICKS, DEAD_PAUSE, type Game } from "../core/game";
 import { FALL_LIMIT, JUMP, TICK } from "../core/physics";
 import { COLORS, hdr, themeFor, type Theme } from "../core/palette";
@@ -53,7 +52,7 @@ import { H, W, type Cavern, type Guardian } from "../world/caverns";
 import { Effects } from "../fx/effects";
 import type { TierSettings } from "./tier";
 import { backdropTextures, rockTexture, seedOf, tileTextures } from "./paint";
-import { crumbleGeometry } from "./props";
+import { crumbleGeometry, crumbleStripGeometry } from "./props";
 import { guardianModel, minerModel, TORCH_GLOW, type Character, type Miner, type Mode } from "./characters";
 
 const DEPTH = 1.2; // block depth (z)
@@ -512,11 +511,8 @@ export class View {
             strips.setMatrixAt(k, this.m4);
         });
         // Crumbling ledges: a dimmer, broken strip (one per crumble cell, posed with its wear in sync).
-        const dash = mergeGeometries(
-            [-0.33, 0, 0.33].map((x) => new THREE.BoxGeometry(0.22, 0.05, 0.05).translate(x, 0, 0))
-        );
         this.crumbleStrips = new THREE.InstancedMesh(
-            dash,
+            crumbleStripGeometry(),
             new THREE.MeshBasicMaterial({ color: hdr(th.glow, EDGE_GLOW * CRUMBLE_STRIP), toneMapped: false }),
             Math.max(1, this.crumbleCells.length)
         );

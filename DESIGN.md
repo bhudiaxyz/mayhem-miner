@@ -72,7 +72,8 @@ src/
     view.ts             three.js scene: voxel cavern, crystals, portal, lights, post-FX
     characters.ts       voxel miner + guardians: part builder, joints, poses, helmet torch
     paint.ts            procedural canvas textures: rock tiles and the layered back wall
-    preview.ts          animated character turntable for How to play (one small renderer)
+    preview.ts          animated turntable for How to play's carousels (one small renderer)
+    props.ts            shared prop geometry (crumbling ledge) + How to play obstacle dioramas
     tier.ts             GPU classification + per-tier quality table
   fx/
     effects.ts          pooled additive sparks, voxel pickup halos, ambient motes
@@ -307,14 +308,14 @@ Guardians keep moving in every phase, so the cavern stays alive behind dialogs. 
 
 `build(cavern, n)` disposes the previous cavern's group (geometries and materials) and creates:
 
-- **Rock, ledges, crumbling ledges, conveyors and doors** as one `InstancedMesh` each (slightly rounded cubes for `#` and `D`, 0.32-thick rounded slabs for one-way tiles, from `RoundedBoxGeometry`, so every edge catches a highlight), with a per-instance colour of the theme tint × a seeded ±10% jitter so no two blocks match.
-- **Edge strips**: a thin `InstancedMesh` of HDR bars along the front-top edge of every standable tile with air above, in the theme's glow colour. They outline every surface you can land on.
+- **Rock, ledges, crumbling ledges, conveyors and doors** as one `InstancedMesh` each (slightly rounded cubes for `#` and `D`, 0.32-thick rounded slabs for ledges and belts, from `RoundedBoxGeometry`, so every edge catches a highlight), with a per-instance colour of the theme tint × a seeded ±10% jitter so no two blocks match. **Crumbling ledges look unsafe at a glance**: `crumbleGeometry()` (render/props.ts) breaks the slab into four uneven voxel chunks with gaps and a few crumbs hanging below, under a rubble texture of chips, cracks and pits.
+- **Edge strips**: a thin `InstancedMesh` of HDR bars along the front-top edge of every standable tile with air above, in the theme's glow colour. They outline every surface you can land on. Crumbling cells get their own **broken, dimmer strip** (three dashes at `CRUMBLE_STRIP` = 55%), posed with the cell's wear each frame, so it sinks with the ledge and vanishes with it (it used to be left floating).
 - **Spikes**: two cones per `^` cell, pointing down if they hang from something and up otherwise.
 - **Crystals** (octahedra), **levers** (base, arm, glowing knob), the **portal** (four frame bars around a core plane), and one **model per guardian** (§9.3).
 - A **patrol zone** per guardian: a faint plane in its colour on the back wall over the box it sweeps, so routes can be planned at a glance.
 - The **backdrop** plane behind everything (§11).
 
-Textures are 16 × 16 greyscale pixel-art tiles painted into canvases: the ledge, crumble, belt and door tiles once at start-up (`textures()`), and the rock tile per cavern in its theme's style (`rockTexture`, §11). They use nearest filtering with no mipmaps and are tinted per instance, so there are no image files. Each texture is also its material's `bumpMap`, so the grit reacts to the lamp. The two belt directions get their own clone of the belt texture so they can scroll opposite ways.
+Textures are 16 × 16 greyscale pixel-art tiles painted into canvases: the ledge, crumble, belt and door tiles once at start-up (`tileTextures()`, render/paint.ts), and the rock tile per cavern in its theme's style (`rockTexture`, §11). They use nearest filtering with no mipmaps and are tinted per instance, so there are no image files. Each texture is also its material's `bumpMap`, so the grit reacts to the lamp. The two belt directions get their own clone of the belt texture so they can scroll opposite ways.
 
 ### 9.3 Models
 
@@ -371,7 +372,12 @@ Plain DOM over the canvas, styled by `styles.css`. Everything is ordinary button
 
 - **Splash** (`#boot`, after thrust-force's, rethemed): a dark cavern with drifting copper bars and twinkling crystal glints; an emblem of the portal arch on a glowing ledge with a crystal bobbing and shimmering inside it and air bubbles rising; the title, a crystal-studded rule and the tagline. Below them the **air gauge** is the loading bar: it fills one boot stage at a time while the tip line names the stage (§15.1), so slow and older devices show steady progress rather than a frozen page. Inline critical CSS in `index.html` keeps the page dark and the dialogs hidden in the moment before `styles.css` (which loads with the JS) arrives.
 - **Main menu**: once booted (`#boot.ready`) the gauge gives way to the menu and the splash turns translucent over the live attract cavern: **Continue** (the deepest cavern reached, fresh lives and score), **New game** (How to play first on the first run), **Cavern select** (every cavern reached so far, by name), **How to play**, **Sound**. On short screens the emblem and tagline hide and the menu wraps into two columns, so every item stays on screen (the smoke test asserts this).
-- **Sheets** (`#sheet`, `ui/menu.ts` `showSheet`): one modal dialog for cavern select and How to play, with the device's bindings. How to play has a **Who's down here** carousel: one animated character at a time (Pip first, then each creature in arrival order), with ◀ ▶ buttons, its kind, the cavern it first appears in, what makes it distinct and what to watch for, and a counter. `render/preview.ts` animates it with one small WebGL renderer that exists only while the sheet is open; it reads the canvas's `data-creature` each frame and caches each model on first view. The CSS is shared with the pause dialog through `:is(#pause, #sheet)`.
+- **Sheets** (`#sheet`, `ui/menu.ts` `showSheet`): one modal dialog for cavern select and How to play, with the device's bindings. How to play has two **carousels** (`carouselsHelp` / `wireCarousels`), each one animated preview at a time with ◀ ▶ buttons, a name, a tag line, a description and a counter:
+    - **Who's down here**: Pip, then each creature in the order it arrives, with what it does, the cavern it first appears in, and what to watch for.
+    - **Obstacles & dangers**: crystal, portal, crumbling ledge, conveyor belt, spikes, and sealed door with lever, each a small looping diorama from `propModel()` (render/props.ts) built from the game's own geometry and textures. The "from cavern N" tag is read from the hand-built maps, so it stays true if caverns change. A note covers long falls and air.
+
+    `render/preview.ts` animates both with **one** small WebGL renderer that exists only while the sheet is open (main.ts `howTo()` starts it and stops it on close, so there's no boot step and no cost during play). Each frame it reads each canvas's `data-preview`, so a carousel only changes the attribute. Models are built on first view and cached, and everything (renderer, geometry, materials, textures, context) is freed on close. The CSS is shared with the pause dialog through `:is(#pause, #sheet)`.
+
 - **Cavern intro card** (`#intro`): for 2.4 s on each cavern load, the number ("Cavern 7 of 20", or "· uncharted" for generated ones), the name, crystal count, air and features (crumbling ledges, conveyors, a lever).
 - **HUD** (`ui/hud.ts`): the cavern name at the top; air bar, score, best, crystals left and lives at the bottom. The air bar blinks red under 20%. It writes to the DOM **only when a value changes**, because identical writes still trigger style recalculation, which shows up as jank on phones. A fading message line announces the portal opening, doors and extra lives.
 - **Pause and game over** (`#pause`): Resume (Esc), Restart cavern (R), Sound (M), Main menu (Q), with the device's bindings. As the **game-over** card (`data-kind="over"`) it shows score, best and the cavern reached, with **Play again** from the same starting cavern.

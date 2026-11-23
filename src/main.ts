@@ -42,9 +42,9 @@ import { drawHud, message } from "./ui/hud";
 import {
     cavernSelectBody,
     closeSheet,
-    creaturesHelp,
+    carouselsHelp,
     hideIntro,
-    wireCreatures,
+    wireCarousels,
     HOWTO,
     menuBack,
     menuNav,
@@ -161,11 +161,11 @@ function howTo(then?: () => void) {
     };
     showSheet({
         title: "How to play",
-        body: HOWTO + creaturesHelp() + bindings(),
+        body: HOWTO + carouselsHelp() + bindings(),
         actions: [{ label: then ? "Start" : "Back", primary: true, action: done }],
         onBack: done,
     });
-    wireCreatures($("#sheet .sheet-body"));
+    wireCarousels($("#sheet .sheet-body"));
     stopPreviews = animatePreviews($("#sheet .sheet-body"));
 }
 
