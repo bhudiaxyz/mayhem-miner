@@ -783,8 +783,14 @@ function patrolZone(gd: Guardian, col: THREE.Color) {
     return m;
 }
 
-/** A blob shadow's quad: flat on the ground, wider than deep (x by z). */
-const BLOB_GEO = new THREE.PlaneGeometry(1, DEPTH * 0.85).rotateX(-Math.PI / 2);
+/**
+ * A blob shadow's quad: on the ground, wider than deep (x by z), tilted BLOB_TILT toward the
+ * camera, which sees ledge tops almost edge-on, and lifted so its front edge rests on the surface.
+ */
+const BLOB_TILT = 0.35;
+const BLOB_GEO = new THREE.PlaneGeometry(1, DEPTH * 0.85)
+    .rotateX(-Math.PI / 2 + BLOB_TILT)
+    .translate(0, ((DEPTH * 0.85) / 2) * Math.sin(BLOB_TILT), 0);
 
 function blobTexture() {
     const c = document.createElement("canvas");
