@@ -186,12 +186,12 @@ The jump table is `[-4,-4,-3,-3,-3,-2,-2,-2,-1,-1,-1,0, 0,1,1,1,2,2,2,3,3,3,4,4]
 | Test                          | Rectangle                                                          |
 | ----------------------------- | ------------------------------------------------------------------ |
 | `blocked(t, x, y)`            | the full 8 × 16 box against `SOLID` cells                          |
-| miner hitbox                  | `[x+1, x+7) × [y+1, y+16)`                                         |
+| miner touch hitbox            | `[x+1, x+7) × [y+HIT_TOP, y+16)`, `HIT_TOP` = 4 (§9.3)             |
 | `hitsCell(x, y, c, r, inset)` | miner hitbox against cell `(c, r)` shrunk by `inset` px            |
 | `touching(t, x, y, "^", 2)`   | any spike cell, inset 2 px (spikes are forgiving at their edges)   |
 | crystals, levers              | `hitsCell` with inset 1                                            |
 | `inPortal(x, y, c, r)`        | the 2 × 2 portal shrunk by 4 px: you have to step properly into it |
-| guardian (in `Game`)          | `[gx+1, gx+7) × [gy+2, gy+15)`                                     |
+| guardian (in `Game`)          | `[gx+1, gx+7) × [gy+5, gy+15)`                                     |
 
 ## 6. The solver (`world/solver.ts`)
 
@@ -289,7 +289,7 @@ Textures are 16 × 16 greyscale pixel-art tiles painted at start-up into canvase
 
 ### 9.3 Models
 
-Every model is a `Group` with its feet at the origin, facing +x, about 1 wide and 2 tall, paired with a `pose(t, moving)` function:
+Every model is a `Group` with its feet at the origin, facing +x, about 1 wide and 2 tall, paired with a `pose(t, moving)` function. The miner, guardians and crystals are drawn at **`SPRITE` = 75%** of that size, scaled from the feet, so they sit comfortably inside their 1 × 2 cell box. Movement still uses the full 8 × 16 px box against rock (so cavern clearances, and the solver's proofs, are unchanged), but every _touch_ test (spikes, guardians, crystals, levers, the portal) uses the shrunken box: `HIT_TOP` (4 px) trims the top of the miner's, and the guardian box starts 5 px down, so what you see touching is what kills.
 
 | Model   | Used for                   | Animation                                                   |
 | ------- | -------------------------- | ----------------------------------------------------------- |
@@ -326,7 +326,8 @@ Plain DOM over the canvas, styled by `styles.css`. Everything is ordinary button
 
 ### 10.1 Screens
 
-- **Splash and main menu** (`#boot`): the icon emblem, title and tagline over an animated CSS copper-bar band. Once booted (`#boot.ready`) it turns translucent over the live attract cavern and shows the menu: **Continue** (the deepest cavern reached, fresh lives and score), **New game** (How to play first on the first run), **Cavern select** (every cavern reached so far, by name), **How to play**, **Sound**. On short screens the emblem and tagline hide and the menu wraps into two columns, so every item stays on screen (the smoke test asserts this).
+- **Splash** (`#boot`, after thrust-force's, rethemed): a dark cavern with drifting copper bars and twinkling crystal glints; an emblem of the portal arch on a glowing ledge with a crystal bobbing and shimmering inside it and air bubbles rising; the title, a crystal-studded rule and the tagline. Below them the **air gauge** is the loading bar: it fills one boot stage at a time while the tip line names the stage (§15.1), so slow and older devices show steady progress rather than a frozen page. Inline critical CSS in `index.html` keeps the page dark and the dialogs hidden in the moment before `styles.css` (which loads with the JS) arrives.
+- **Main menu**: once booted (`#boot.ready`) the gauge gives way to the menu and the splash turns translucent over the live attract cavern: **Continue** (the deepest cavern reached, fresh lives and score), **New game** (How to play first on the first run), **Cavern select** (every cavern reached so far, by name), **How to play**, **Sound**. On short screens the emblem and tagline hide and the menu wraps into two columns, so every item stays on screen (the smoke test asserts this).
 - **Sheets** (`#sheet`, `ui/menu.ts` `showSheet`): one modal dialog for cavern select and How to play, with the device's bindings. The CSS is shared with the pause dialog through `:is(#pause, #sheet)`.
 - **Cavern intro card** (`#intro`): for 2.4 s on each cavern load, the number ("Cavern 7 of 20", or "· uncharted" for generated ones), the name, crystal count, air and features (crumbling ledges, conveyors, a lever).
 - **HUD** (`ui/hud.ts`): the cavern name at the top; air bar, score, best, crystals left and lives at the bottom. The air bar blinks red under 20%. It writes to the DOM **only when a value changes**, because identical writes still trigger style recalculation, which shows up as jank on phones. A fading message line announces the portal opening, doors and extra lives.
@@ -381,6 +382,7 @@ Without WebGL2, boot explains why instead of failing obscurely.
 - **Fixed 40 Hz simulation** with render interpolation: the game behaves the same at any refresh rate, and `dt` is capped at 50 ms so a hitch can't skip collisions.
 - **Rebuild only on cavern change**: deaths and restarts reuse every mesh; per-frame state is read from the `Game`.
 - **Instancing**: a whole cavern is about a dozen draw calls for the blocks, plus a handful per model.
+- **Shader warm-up at boot** (§15.1): every program is compiled behind the splash, not mid-play.
 - **No per-frame allocation** in `View.sync` or `Effects.update`; scratch matrices and vectors are reused.
 - **HUD writes only on change** (§10.1).
 - **Generated caverns** take about 15 ms and are memoised (§7).
@@ -406,7 +408,17 @@ All devices feed one `Input { left, right, jump }`:
 
 ### 15.1 Boot
 
-`startup()`: detect the tier (or explain the missing WebGL2), create the `View` and an attract `Game` (cavern 1, demo), draw one frame, wait for fonts (capped at 1.5 s, so menu labels don't reflow), then start the loop and show the main menu. Any error lands in the splash subtitle with a hint (`?tier=low`).
+`startup()` is an async sequence of `STEPS`. Before each one, `step(i)` sets the splash's air gauge to `i / 5`, names the stage in the tip line and **yields two animation frames**, so the gauge and text really paint before the next blocking piece of work. On a fast desktop the gauge fills in a blink; on an older phone each stage is visible.
+
+| Stage                  | Work                                                                                                                                                                                                     |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Lighting the lamps     | `detectTier()`; without WebGL2, explain and stop                                                                                                                                                         |
+| Shoring up the tunnels | `new View`: renderer, lights, textures, composer                                                                                                                                                         |
+| Charting cavern 1      | the attract `Game` and its first `sync` (builds every cavern mesh)                                                                                                                                       |
+| Polishing the crystals | `view.warmup()`: `renderer.compileAsync` over the whole scene plus one composer render, with one invisible spark so the particle shader compiles too; no compile stall on the first frame or first burst |
+| Painting the signs     | `document.fonts.ready`, capped at 1.5 s, so menu labels don't reflow                                                                                                                                     |
+
+Then the gauge reads full ("Ready"), the loop starts and the main menu shows. Any error lands in the splash subtitle (in red) with a hint (`?tier=low`).
 
 ### 15.2 Frame
 
@@ -434,7 +446,7 @@ All devices feed one `Input { left, right, jump }`:
 
 ```bash
 npm install
-npm run dev        # http://localhost:5191/mayhem-miner/
+npm run dev        # http://localhost:5191/mayhem-miner/ (strict port: fails if 5191 is taken)
 npm run check      # headless asserts
 npm run build      # typecheck + production build into dist/
 npm run preview    # serve dist/ (then: python scripts/smoke.py)
@@ -448,25 +460,27 @@ npm run preview    # serve dist/ (then: python scripts/smoke.py)
 
 ## 18. Tuning reference
 
-| Constant          | Where               | Value                    | Effect                                 |
-| ----------------- | ------------------- | ------------------------ | -------------------------------------- |
-| `TICK`            | `core/physics.ts`   | 1/40 s                   | simulation rate                        |
-| walk speed        | `stepBody`          | 1 px/tick (5 cells/s)    | also conveyor speed                    |
-| `JUMP`            | `core/physics.ts`   | 24 ticks, 26 px high     | jump height, length and timing         |
-| `FALL_SPEED`      | `core/physics.ts`   | 4 px/tick                | straight fall speed                    |
-| `FALL_LIMIT`      | `core/physics.ts`   | 48 px (6 cells)          | longest survivable fall, from the apex |
-| `CRUMBLE_TICKS`   | `core/game.ts`      | 28 ticks (0.7 s)         | how long a crumbling cell holds you    |
-| `guardianSpeed`   | `core/game.ts`      | 0.6 + 0.012 · min(n, 40) | guardian px/tick                       |
-| air               | `parse`, `generate` | 75 − n s; 60 → 45 s      | hand-built; generated                  |
-| `CRYSTAL_POINTS`  | `core/game.ts`      | 100                      | per crystal                            |
-| `AIR_POINTS`      | `core/game.ts`      | 20                       | per second of air left                 |
-| `EXTRA_LIFE`      | `core/game.ts`      | 10,000                   | points per extra life                  |
-| `START_LIVES`     | `core/game.ts`      | 3                        | lives per run                          |
-| dead pause        | `Game.die`          | 1.6 s                    | before the cavern restarts             |
-| `BANDS`           | `world/generate.ts` | rows 12, 9, 6, 3         | generated ledge bands (one jump apart) |
-| `ATTRACT_SECONDS` | `main.ts`           | 6 s                      | title-screen cavern cycle              |
-| bloom             | `render/view.ts`    | 0.7 / 0.4 / 0.85         | strength / radius / threshold          |
-| `FOV`             | `render/view.ts`    | 30°                      | camera field of view                   |
+| Constant          | Where               | Value                    | Effect                                    |
+| ----------------- | ------------------- | ------------------------ | ----------------------------------------- |
+| `TICK`            | `core/physics.ts`   | 1/40 s                   | simulation rate                           |
+| walk speed        | `stepBody`          | 1 px/tick (5 cells/s)    | also conveyor speed                       |
+| `JUMP`            | `core/physics.ts`   | 24 ticks, 26 px high     | jump height, length and timing            |
+| `FALL_SPEED`      | `core/physics.ts`   | 4 px/tick                | straight fall speed                       |
+| `FALL_LIMIT`      | `core/physics.ts`   | 48 px (6 cells)          | longest survivable fall, from the apex    |
+| `CRUMBLE_TICKS`   | `core/game.ts`      | 28 ticks (0.7 s)         | how long a crumbling cell holds you       |
+| `guardianSpeed`   | `core/game.ts`      | 0.6 + 0.012 · min(n, 40) | guardian px/tick                          |
+| air               | `parse`, `generate` | 75 − n s; 60 → 45 s      | hand-built; generated                     |
+| `CRYSTAL_POINTS`  | `core/game.ts`      | 100                      | per crystal                               |
+| `AIR_POINTS`      | `core/game.ts`      | 20                       | per second of air left                    |
+| `EXTRA_LIFE`      | `core/game.ts`      | 10,000                   | points per extra life                     |
+| `START_LIVES`     | `core/game.ts`      | 3                        | lives per run                             |
+| dead pause        | `Game.die`          | 1.6 s                    | before the cavern restarts                |
+| `BANDS`           | `world/generate.ts` | rows 12, 9, 6, 3         | generated ledge bands (one jump apart)    |
+| `ATTRACT_SECONDS` | `main.ts`           | 6 s                      | title-screen cavern cycle                 |
+| bloom             | `render/view.ts`    | 0.7 / 0.4 / 0.85         | strength / radius / threshold             |
+| `FOV`             | `render/view.ts`    | 30°                      | camera field of view                      |
+| `SPRITE`          | `render/view.ts`    | 0.75                     | drawn size of miner, guardians, crystals  |
+| `HIT_TOP`         | `core/physics.ts`   | 4 px                     | touch hitbox trimmed to match the sprites |
 
 ## 19. Known limits and extension points
 
