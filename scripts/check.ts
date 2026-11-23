@@ -15,6 +15,7 @@
  *   4. Rules: crystals score and open the portal; the portal completes the cavern and air
  *      becomes bonus; crumbling ledges give way; levers open doors; spikes and guardians kill;
  *      running out of air kills; lives run out into game over; extra life at 10,000.
+ *   5. Voxel characters: the face builder emits only air-facing faces.
  *
  * Usage
  *   npm run check (exits non-zero on the first failure).
@@ -27,6 +28,7 @@ import { generate } from "../src/world/generate";
 import { solve } from "../src/world/solver";
 import { Game } from "../src/core/game";
 import { stepBody, type Body } from "../src/core/physics";
+import { voxelFaces } from "../src/render/characters";
 
 const idle = { left: false, right: false, jump: false };
 const left = { left: true, right: false, jump: false };
@@ -179,6 +181,19 @@ function lab(rows: string[]) {
     g.score = 9950;
     run(right, 20);
     assert.ok(events.includes("extra") && g.lives === 4, "extra life at 10,000");
+}
+
+// 5. Voxel characters: only faces exposed to air are emitted, glow voxels go to their own set.
+{
+    const one = voxelFaces([[0, 0, 0, 1, 1, 1, 0xffffff]]);
+    assert.equal(one.solid.pos.length, 6 * 6 * 3, "a lone voxel has 6 faces");
+    const two = voxelFaces([
+        [0, 0, 0, 2, 1, 1, 0xffffff],
+        [1, 0, 0, 1, 1, 1, 0xff0000, 2],
+    ]);
+    assert.equal(two.solid.pos.length / 18, 5, "shared face hidden, painted voxel replaced");
+    assert.equal(two.glow.pos.length / 18, 5, "glow voxel has its own faces");
+    assert.equal(voxelFaces([[0, 0, 0, 3, 3, 3, 0xffffff]]).solid.pos.length / 18, 54, "3³ cube: surface only");
 }
 
 console.log("check: all passed");

@@ -1,5 +1,5 @@
 /**
- * Effects — a pooled spark system for crystal pickups, deaths, crumbles and portal bursts.
+ * Effects — pooled sparks for pickups, deaths, crumbles and portal bursts, plus voxel halos.
  *
  * Purpose
  *   Short-lived particles drawn as one additive Points layer, so any number of bursts cost a
@@ -11,7 +11,10 @@
  *     overwrites random slots.
  *   - update(dt): integrates, fades by remaining life, and compacts live sparks to the front so
  *     the draw range is exactly the live set.
- *   - clear(): drops every spark (cavern change).
+ *   - halo(x, y, color): a blocky crystal-pickup halo: two rings of glowing cubes snapped to
+ *     the 1/8 voxel grid (so they read as pixel-art circles) burst outward, shrinking and
+ *     spinning as they fade, with a flash of coloured light. One InstancedMesh, HALOS at once.
+ *   - clear(): drops every spark and halo (cavern change).
  *
  * Highlights
  *   - No allocation per frame: buffers are written element-wise.
@@ -20,6 +23,19 @@
  * See also: render/view.ts (owner), main.ts (event → burst); DESIGN.md "9. Rendering".
  */
 import * as THREE from "three";
+
+/** Halos alive at once, cubes per halo (both rings), and seconds each lasts. */
+const HALOS = 4;
+const HALO_CUBES = 24;
+const HALO_LIFE = 0.6;
+/** [cubes, start delay (s), reach (world units)] per ring. */
+const RINGS: [number, number, number][] = [
+    [16, 0, 1.5],
+    [8, 0.08, 0.9],
+];
+const AXIS = new THREE.Vector3(0.3, 0.5, 1).normalize();
+const V = new THREE.Vector3(),
+    S = new THREE.Vector3();
 
 export class Effects {
     private pos: Float32Array;
@@ -32,6 +48,17 @@ export class Effects {
     private n = 0;
     private geo = new THREE.BufferGeometry();
     readonly points: THREE.Points;
+    private halos: { x: number; y: number; color: THREE.Color; age: number }[] = [];
+    private cubes = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshBasicMaterial({ blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
+        HALOS * HALO_CUBES
+    );
+    /** Lights the walls around a pickup; always in the scene so shaders never recompile. */
+    private flash = new THREE.PointLight(0xffffff, 0, 6, 1.5);
+    private m4 = new THREE.Matrix4();
+    private q = new THREE.Quaternion();
+    private c = new THREE.Color();
 
     constructor(
         scene: THREE.Scene,
@@ -60,7 +87,15 @@ export class Effects {
             })
         );
         this.points.frustumCulled = false;
-        scene.add(this.points);
+        this.cubes.frustumCulled = false;
+        this.cubes.count = 0;
+        this.cubes.setColorAt(0, this.c.set(0)); // allocate instanceColor before the warm-up compile
+        scene.add(this.points, this.cubes, this.flash);
+    }
+
+    halo(x: number, y: number, color: THREE.Color) {
+        if (this.halos.length >= HALOS) this.halos.shift();
+        this.halos.push({ x, y, color: color.clone(), age: 0 });
     }
 
     burst(x: number, y: number, color: THREE.Color, count: number, speed = 4, gravity = 6) {
@@ -102,11 +137,50 @@ export class Effects {
         this.geo.setDrawRange(0, w);
         (this.geo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
         (this.geo.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+        this.updateHalos(dt);
+    }
+
+    private updateHalos(dt: number) {
+        this.halos = this.halos.filter((h) => (h.age += dt) < HALO_LIFE);
+        const snap = (v: number) => Math.round(v * 8) / 8;
+        let n = 0;
+        for (const h of this.halos) {
+            // Outer ring of 16, then an inner ring of 8 a beat later.
+            for (const [count, delay, reach] of RINGS) {
+                const k = (h.age - delay) / (HALO_LIFE - delay);
+                if (k <= 0) continue;
+                const ease = 1 - (1 - k) ** 3;
+                const r = 0.65 + reach * ease;
+                const size = 0.2 * (1 - k * 0.6);
+                this.q.setFromAxisAngle(AXIS, k * 4);
+                const fade = (1 - k) ** 1.5;
+                for (let i = 0; i < count; i++) {
+                    const a = (i / count) * Math.PI * 2 + delay * 3;
+                    this.m4.compose(
+                        V.set(snap(h.x + Math.cos(a) * r), snap(h.y + Math.sin(a) * r), 0.7),
+                        this.q,
+                        S.setScalar(size)
+                    );
+                    this.cubes.setMatrixAt(n, this.m4);
+                    this.cubes.setColorAt(n++, this.c.copy(h.color).multiplyScalar(fade));
+                }
+            }
+        }
+        this.cubes.count = n;
+        this.cubes.instanceMatrix.needsUpdate = true;
+        if (this.cubes.instanceColor) this.cubes.instanceColor.needsUpdate = true;
+        // The newest halo drives the flash.
+        const h = this.halos[this.halos.length - 1];
+        this.flash.intensity = h ? 6 * (1 - h.age / HALO_LIFE) ** 2 : 0;
+        if (h) (this.flash.position.set(h.x, h.y, 1.2), this.flash.color.copy(h.color).multiplyScalar(0.5));
     }
 
     clear() {
         this.n = 0;
         this.geo.setDrawRange(0, 0);
+        this.halos = [];
+        this.cubes.count = 0;
+        this.flash.intensity = 0;
     }
 }
 

@@ -187,7 +187,10 @@ function onEvent(e: GameEvent) {
     const m = g.miner;
     const mx = m.x + 4,
         my = m.y + 8;
-    if (e === "crystal" || e === "open") view.burst(mx, my, COLORS.crystalCycle[g.left % 5], 26);
+    if (e === "crystal" || e === "open") {
+        view.burst(mx, my, COLORS.crystalCycle[g.left % 5], 26);
+        view.halo(mx, my, COLORS.crystalCycle[g.left % 5]);
+    }
     if (e === "open") {
         const p = g.cavern.portal;
         view.burst(p.c * 8 + 8, p.r * 8 + 8, COLORS.helmet, 60, 6);

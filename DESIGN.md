@@ -68,7 +68,8 @@ src/
   player/
     input.ts            keyboard, touch buttons, gamepads → Input; control help text
   render/
-    view.ts             three.js scene: voxel cavern, models, crystals, portal, lights, post-FX
+    view.ts             three.js scene: voxel cavern, crystals, portal, lights, post-FX
+    characters.ts       voxel miner + guardians: part builder, joints, poses, helmet torch
     tier.ts             GPU classification + per-tier quality table
   fx/
     effects.ts          pooled additive sparks
@@ -290,16 +291,22 @@ Textures are 16 × 16 greyscale pixel-art tiles painted at start-up into canvase
 
 ### 9.3 Models
 
-Every model is a `Group` with its feet at the origin, facing +x, about 1 wide and 2 tall, paired with a `pose(t, moving)` function. The miner, guardians and crystals are drawn at **`SPRITE` = 75%** of that size, scaled from the feet, so they sit comfortably inside their 1 × 2 cell box. Movement still uses the full 8 × 16 px box against rock (so cavern clearances, and the solver's proofs, are unchanged), but every _touch_ test (spikes, guardians, crystals, levers, the portal) uses the shrunken box: `HIT_TOP` (4 px) trims the top of the miner's, and the guardian box starts 5 px down, so what you see touching is what kills.
+Every character lives in `render/characters.ts` and is **built from voxel cubes**: one voxel is 1/8 unit, so a 1 × 2 cell character is 8 × 16 voxels, the same grid as the game's pixels. Each body part is a list of boxes (later boxes paint details over earlier ones). `voxelFaces()` fills a grid from them and emits only the faces exposed to air, with a small per-voxel brightness jitter so the cubes read individually. Glowing voxels (eyes, lamp lens, antenna tips) go into a second, unlit HDR mesh, so a part is at most two draw calls. Parts hang from **joints** (hips, shoulders, neck, wing roots, rotor hub), and `pose(state)` only rotates or moves joints. The state is `{ dt, t, phase, mode, land }`: `phase` is the walk cycle driven by distance moved (so feet match the ground), `mode` is `idle | walk | rise | fall | flail`, and `land` is a landing squash. The miner eases toward each mode's target pose by `dt`, so transitions blend instead of snapping, and everything freezes while paused (`dt` = 0).
 
-| Model   | Used for                   | Animation                                                   |
-| ------- | -------------------------- | ----------------------------------------------------------- |
-| miner   | the player                 | legs and arms swing with distance walked; tucked in the air |
-| robot   | walkers, caverns n % 3 = 0 | wheel spins, head scans, body bobs                          |
-| crawler | walkers, caverns n % 3 = 1 | six legs ripple                                             |
-| blob    | walkers, caverns n % 3 = 2 | squash and stretch, eyes ride the squash                    |
-| bat     | fliers                     | wings flap, body bobs                                       |
-| drone   | lifts                      | core tumbles, glowing ring precesses                        |
+All characters face +x with their feet at the origin. The miner, guardians and crystals are drawn at **`SPRITE` = 75%** of their size, scaled from the feet, so they sit comfortably inside their 1 × 2 cell box. Movement still uses the full 8 × 16 px box against rock (so cavern clearances, and the solver's proofs, are unchanged), but every _touch_ test (spikes, guardians, crystals, levers, the portal) uses the shrunken box: `HIT_TOP` (4 px) trims the top of the miner's, and the guardian box starts 5 px down, so what you see touching is what kills.
+
+| Model  | Used for                   | Joints and animation                                                                       |
+| ------ | -------------------------- | ------------------------------------------------------------------------------------------ |
+| miner  | the player                 | legs, arms, torso, head. Walk swing + bob + lean; idle breathe + look; tuck; flail; squash |
+| robot  | walkers, caverns n % 3 = 0 | stiff legs and arms swing, torso bobs, visor head scans                                    |
+| beetle | walkers, caverns n % 3 = 1 | six legs in a tripod gait, shell bobs                                                      |
+| slime  | walkers, caverns n % 3 = 2 | hops along, squashing and stretching (translucent)                                         |
+| bat    | fliers                     | wings flap from the shoulders, body bobs                                                   |
+| drone  | lifts                      | rotor spins, core bobs and sways, thruster glows                                           |
+
+**The helmet torch.** The miner's helmet carries a steel housing with a glowing lens. A soft additive cone (vertex-faded, no texture) shines from it, and a `SpotLight` kept in the scene (never hidden, so shaders never recompile) is aimed each frame from the lens toward a point ahead of the head, so it follows bob, lean and look. Two independent knobs set the strength: `MINER_GLOW` (view.ts) for the warm halo point light around the miner, and `TORCH_GLOW` (characters.ts) for the spotlight, beam and lens. Both fade through a death and gutter on low air. Crystals glow at `CRYSTAL_GLOW` (view.ts).
+
+**Crystal pickup halo.** `Effects.halo()` adds a blocky halo: two rings of glowing cubes (16 outer, 8 inner a beat later) snapped to the voxel grid so they read as pixel-art circles. They burst outward, shrinking and spinning as they fade over 0.6 s, with a flash of point light in the crystal's colour. It is one `InstancedMesh` shared by up to four halos.
 
 Guardian colours are an HSL hue stepped by cavern (`n · 0.137`), offset per guardian kind. Facing is a rotation of ±0.45 rad off side-on, so the models read as 3D. Turns ease between the two angles through facing the camera rather than snapping.
 
@@ -342,9 +349,9 @@ One JSON record in `localStorage['mm-save']`: `best`, `reached` (the deepest cav
 
 The rule is that **touch controls never cover the cavern**. `#app` (the canvas host) and `#hud` share an inset driven by three CSS variables:
 
-| Situation                         | Inset                                                 | Buttons                                           |
-| --------------------------------- | ----------------------------------------------------- | ------------------------------------------------- |
-| Desktop / fine pointer            | none                                                  | none                                              |
+| Situation                         | Inset                                                 | Buttons                                             |
+| --------------------------------- | ----------------------------------------------------- | --------------------------------------------------- |
+| Desktop / fine pointer            | none                                                  | none                                                |
 | Touch, portrait (phones, tablets) | `--strip`: a bottom strip of button height + 40 px    | stick bottom-left, ▲ bottom-right, inside the strip |
 | Touch, landscape                  | `--side-l` / `--side-r`: gutters sized to the buttons | stick in the left gutter, ▲ in the right            |
 

@@ -8,18 +8,20 @@
  * Operations
  *   - new View(host, tier): renderer (ACES tone mapping, sRGB), a fixed perspective camera
  *     framed to the 32 × 16 cavern plus HUD margins, hemisphere + key light (+ shadows on high
- *     tiers), the miner's helmet lamp, shared pixel-art textures, and the composer
+ *     tiers), the miner's helmet lamp (a halo point light plus the torch spotlight aimed from the
+ *     voxel lens), shared pixel-art textures, and the composer
  *     (RenderPass → UnrealBloomPass → OutputPass) on a HalfFloat multisampled target.
  *   - build(cavern): disposes the previous cavern's group and builds this one:
  *       rock (#), ledges (=), crumbling ledges (~), conveyors (< >), doors (D) as InstancedMeshes;
  *       glowing edge strips on every air-facing top; spikes; levers; crystals; the portal;
- *       guardian models; and the backdrop canvas.
+ *       voxel guardian models (render/characters.ts); and the backdrop canvas.
  *   - sync(game, dt): rebuilds when game.cavern changes identity, then poses everything:
  *     crumble wear (ledges sink and shrink), doors, crystals (colour cycling = flashing,
  *     hidden once taken), lever, portal (dark until open, then pulsing), guardians and the
  *     miner, both interpolated between 40 Hz ticks by game.alpha, then renders.
  *   - warmup(): compileAsync over the whole scene plus one composer render, at boot.
  *   - burst(px, py, color, n): sparks at a game-pixel position (main.ts, on events).
+ *   - halo(px, py, color): the voxel crystal-pickup halo (fx/effects.ts).
  *   - resize(): on window resize; reframes the camera.
  *
  * Usage
@@ -43,12 +45,13 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { CRUMBLE_TICKS, DEAD_PAUSE, type Game } from "../core/game";
-import { FALL_LIMIT, TICK } from "../core/physics";
+import { FALL_LIMIT, JUMP, TICK } from "../core/physics";
 import { COLORS, hdr, themeFor, type Theme } from "../core/palette";
 import { rng } from "../core/random";
 import { H, W, type Cavern, type Guardian } from "../world/caverns";
 import { Effects } from "../fx/effects";
 import type { TierSettings } from "./tier";
+import { guardianModel, minerModel, TORCH_GLOW, type Character, type Miner, type Mode } from "./characters";
 
 const DEPTH = 1.2; // block depth (z)
 /** Miner, guardians and crystals are drawn at 75% of their 1 × 2 cell box, from the feet. */
@@ -63,8 +66,16 @@ const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)").matches;
 /** Facing angles: a turn eases from one to the other through facing the camera. */
 const FACE_R = -0.45,
     FACE_L = -Math.PI + 0.45;
-
-type Pose = (t: number, moving: number) => void;
+/** HDR strength of the floating crystals (bloom picks up anything above 1). */
+const CRYSTAL_GLOW = 2.4 * 0.85;
+/** Seconds a landing squash takes to spring back. */
+const LAND_SQUASH = 0.18;
+/** The miner's glow: the warm halo point light around him (independent of the torch). */
+const MINER_GLOW = 0.75;
+/** Torch spotlight strength at full air; scaled by TORCH_GLOW (characters.ts) with the beam and lens. */
+const TORCH = 16;
+/** Walk cycle radians per game px moved (miner, guardians). */
+const STRIDE = 0.35;
 
 export class View {
     readonly renderer: THREE.WebGLRenderer;
@@ -89,8 +100,12 @@ export class View {
     private crystals: THREE.Mesh[] = [];
     private levers: THREE.Group[] = [];
     private portal!: { group: THREE.Group; frame: THREE.MeshBasicMaterial; core: THREE.MeshBasicMaterial };
-    private guardians: { group: THREE.Group; pose: Pose }[] = [];
-    private miner: { group: THREE.Group; pose: Pose };
+    private guardians: (Character & { dist: number; last: number })[] = [];
+    private miner: Miner;
+    /** The helmet torch: a spotlight kept in the scene (never hidden, so shaders never recompile). */
+    private torch = new THREE.SpotLight(COLORS.lampLight, 0, 12, 0.5, 0.7, 1.4);
+    private wasGround = true;
+    private landAt = -Infinity;
     private belts: THREE.Texture[] = [];
     private theme!: Theme;
     private m4 = new THREE.Matrix4();
@@ -122,7 +137,15 @@ export class View {
             this.key.shadow.bias = -0.0005;
             this.key.shadow.normalBias = 0.03;
         }
-        this.scene.add(this.key, this.key.target, this.lamp, this.portalLight, this.level);
+        this.scene.add(
+            this.key,
+            this.key.target,
+            this.lamp,
+            this.portalLight,
+            this.level,
+            this.torch,
+            this.torch.target
+        );
         this.miner = minerModel();
         this.scene.add(this.miner.group);
         this.effects = new Effects(this.scene, ts.particles);
@@ -180,6 +203,11 @@ export class View {
         this.effects.burst(px / 8, H - py / 8, hdr(color, 2.2), n, speed, gravity);
     }
 
+    /** A blocky voxel halo and light flash at a game-pixel position (crystal pickups). */
+    halo(px: number, py: number, color: number) {
+        this.effects.halo(px / 8, H - py / 8, hdr(color, 2.4));
+    }
+
     sync(g: Game, dt: number) {
         if (g.cavern !== this.built) this.build(g.cavern, g.n);
         const t = g.time;
@@ -205,7 +233,9 @@ export class View {
             m.rotation.y = t * 2 + i;
             m.position.y = (m.userData.y as number) + Math.sin(t * 3 + i) * 0.06;
             const cyc = COLORS.crystalCycle;
-            (m.material as THREE.MeshBasicMaterial).color.copy(hdr(cyc[(Math.floor(t * 8) + i) % cyc.length], 2.4));
+            (m.material as THREE.MeshBasicMaterial).color.copy(
+                hdr(cyc[(Math.floor(t * 8) + i) % cyc.length], CRYSTAL_GLOW)
+            );
         });
         for (const l of this.levers) l.children[1].rotation.z = g.doorsOpen ? -0.6 : 0.6;
         const p = this.portal;
@@ -228,7 +258,10 @@ export class View {
                 y = lerp(gd.py, gd.y, a);
             v.group.position.set(x / 8 + 0.5, H - y / 8 - 2, 0);
             if (gd.kind !== "lift") v.group.rotation.y += ((gd.dir > 0 ? FACE_R : FACE_L) - v.group.rotation.y) * turn;
-            v.pose(t, 1);
+            const p = gd.kind === "lift" ? y : x;
+            v.dist += Math.abs(p - v.last);
+            v.last = p;
+            v.pose({ dt, t, phase: v.dist * STRIDE, mode: "walk", land: 0 });
         });
 
         const m = g.miner;
@@ -247,28 +280,52 @@ export class View {
             let s = g.phase === "complete" ? Math.max(0.05, g.air / g.cavern.air) : 1;
             mg.rotation.y += ((m.face > 0 ? FACE_R : FACE_L) - mg.rotation.y) * turn;
             mg.rotation.z = 0;
-            let lamp = 9;
+            // 1 normally; fades through a death tumble and gutters on low air. Drives glow and torch.
+            let power = 1;
             if (since < TUMBLE) {
                 const k = since / TUMBLE;
                 y += since * 3 - since * since * 8;
                 s = 1 - k;
                 mg.rotation.z = -m.face * since * 9;
-                lamp *= 1 - k;
+                power *= 1 - k;
             }
             mg.position.set(x, y, 0);
             mg.scale.setScalar(s * SPRITE);
             // Legs follow distance walked, interpolated to the drawn position (not 40 Hz steps).
             const walk = m.walk - Math.abs(m.x - m.px) * (1 - a);
-            if (doomed || since < TUMBLE) this.miner.pose(t * 28, 1);
-            else this.miner.pose(m.mode === "ground" ? walk * 0.35 : -1, m.mode === "ground" ? 1 : 0);
+            const ground = m.mode === "ground";
+            if (ground && !this.wasGround) this.landAt = t;
+            this.wasGround = ground;
+            const mode: Mode =
+                doomed || since < TUMBLE
+                    ? "flail"
+                    : ground
+                      ? m.x !== m.px
+                          ? "walk"
+                          : "idle"
+                      : m.mode === "jump" && JUMP[m.t] < 0
+                        ? "rise"
+                        : "fall";
+            const land = Math.max(0, 1 - (t - this.landAt) / LAND_SQUASH);
+            this.miner.pose({ dt, t, phase: walk * STRIDE, mode, land });
             // Low air: the lamp dims and (motion allowing) gutters.
             const f = g.air / g.cavern.air;
             if (g.phase === "play" && f < 0.2)
-                lamp *= (0.45 + 2.75 * f) * (REDUCED_MOTION ? 1 : 0.75 + 0.25 * Math.sin(t * 31) * Math.sin(t * 7.7));
+                power *= (0.45 + 2.75 * f) * (REDUCED_MOTION ? 1 : 0.75 + 0.25 * Math.sin(t * 31) * Math.sin(t * 7.7));
             this.lamp.position.set(x + m.face * 0.3, y + 1.9 * SPRITE, 1.4);
-            this.lamp.intensity = lamp;
-        } else this.lamp.intensity = g.demo ? 0 : this.lamp.intensity * 0.9;
+            this.lamp.intensity = 9 * MINER_GLOW * power;
+            // The torch beam follows the head (bob, lean, look) from the lens.
+            mg.updateMatrixWorld(true);
+            this.miner.lens.getWorldPosition(this.torch.position);
+            this.miner.aim.getWorldPosition(this.torch.target.position);
+            this.torch.intensity = TORCH * TORCH_GLOW * power;
+            this.miner.beam.material.color.setScalar(TORCH_GLOW * power);
+        } else {
+            this.lamp.intensity = g.demo ? 0 : this.lamp.intensity * 0.9;
+            this.torch.intensity = 0;
+        }
         this.lamp.color.setHex(doomed && Math.floor(t * 12) % 2 ? COLORS.lampDanger : COLORS.lampLight);
+        this.torch.color.copy(this.lamp.color);
 
         // Camera drifts a little toward the miner so the diorama shows its depth.
         if (!REDUCED_MOTION) {
@@ -501,21 +558,20 @@ export class View {
         this.portalLight.position.set(cv.portal.c + 1, H - cv.portal.r - 1, 1.2);
 
         const hue = (n * 0.137) % 1;
-        const walker = [robotModel, crawlerModel, blobModel][n % 3];
         this.guardians = cv.guardians.map((gd: Guardian) => {
             const col = new THREE.Color().setHSL(
                 hue + (gd.kind === "lift" ? 0.33 : gd.kind === "fly" ? 0.6 : 0),
                 0.65,
                 0.5
             );
-            const v = gd.kind === "lift" ? droneModel(col) : gd.kind === "fly" ? batModel(col) : walker(col);
+            const v = guardianModel(gd.kind, n, col);
             v.group.traverse((o) => (o.castShadow = this.ts.shadowMap > 0));
             v.group.scale.setScalar(SPRITE);
             if (gd.kind !== "lift") v.group.rotation.y = gd.dir > 0 ? FACE_R : FACE_L;
             this.level.add(v.group, patrolZone(gd, col));
-            return v;
+            return { ...v, dist: 0, last: gd.kind === "lift" ? gd.y : gd.x };
         });
-        this.miner.group.traverse((o) => (o.castShadow = this.ts.shadowMap > 0));
+        this.miner.group.traverse((o) => (o.castShadow = this.ts.shadowMap > 0 && !o.userData.fx));
     }
 }
 
@@ -536,190 +592,11 @@ function patrolZone(gd: Guardian, col: THREE.Color) {
     return m;
 }
 
-// ---- Models ---------------------------------------------------------------------------------------
-// Each model is a Group with its feet at the origin, facing +x, about 1 wide and 2 tall,
-// plus a pose(t, moving) function that animates it.
-
+// Plain box mesh, for the portal frame.
 function box(w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0, z = 0) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     m.position.set(x, y, z);
     return m;
-}
-const std = (color: number | THREE.Color, extra: THREE.MeshStandardMaterialParameters = {}) =>
-    new THREE.MeshStandardMaterial({ color, roughness: 0.7, ...extra });
-const glow = (color: number | THREE.Color, k = 2) =>
-    new THREE.MeshBasicMaterial({
-        color: hdr(typeof color === "number" ? color : color.getHex(), k),
-        toneMapped: false,
-    });
-
-function limb(w: number, h: number, mat: THREE.Material, x: number, y: number) {
-    const pivot = new THREE.Group();
-    pivot.position.set(x, y, 0);
-    pivot.add(box(w, h, w, mat, 0, -h / 2, 0));
-    return pivot;
-}
-
-function minerModel() {
-    const g = new THREE.Group();
-    const overalls = std(COLORS.overalls),
-        skin = std(COLORS.skin),
-        helmet = std(COLORS.helmet, { metalness: 0.2, roughness: 0.4 }),
-        boots = std(COLORS.boots);
-    const legs = [limb(0.24, 0.62, overalls, -0.12, 0.82), limb(0.24, 0.62, overalls, 0.12, 0.82)];
-    legs.forEach((l, i) => l.add(box(0.3, 0.16, 0.34, boots, 0.04, -0.62, 0)) && (l.position.z = i ? 0.12 : -0.12));
-    const arms = [limb(0.16, 0.5, std(COLORS.shirt), 0, 1.35), limb(0.16, 0.5, std(COLORS.shirt), 0, 1.35)];
-    arms[0].position.z = -0.3;
-    arms[1].position.z = 0.3;
-    g.add(...legs, ...arms);
-    g.add(box(0.56, 0.62, 0.5, overalls, 0, 1.12, 0));
-    g.add(box(0.44, 0.42, 0.42, skin, 0, 1.64, 0));
-    g.add(box(0.52, 0.18, 0.5, helmet, 0, 1.92, 0));
-    g.add(box(0.2, 0.05, 0.5, helmet, 0.3, 1.84, 0));
-    g.add(box(0.1, 0.12, 0.12, glow(COLORS.lamp, 3), 0.28, 1.95, 0));
-    g.add(
-        box(0.06, 0.06, 0.06, std(0x101018), 0.22, 1.68, 0.1),
-        box(0.06, 0.06, 0.06, std(0x101018), 0.22, 1.68, -0.1)
-    );
-    const pose: Pose = (t, moving) => {
-        const s = moving ? Math.sin(t) * 0.7 : 0;
-        legs[0].rotation.z = moving ? s : 0.5;
-        legs[1].rotation.z = moving ? -s : -0.3;
-        arms[0].rotation.z = moving ? -s : 2.4;
-        arms[1].rotation.z = moving ? s : 2.4;
-    };
-    return { group: g, pose };
-}
-
-function robotModel(col: THREE.Color): { group: THREE.Group; pose: Pose } {
-    const g = new THREE.Group();
-    const body = std(col, { metalness: 0.5, roughness: 0.35 });
-    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.5, 10), std(0x202028));
-    wheel.rotation.x = Math.PI / 2;
-    wheel.position.y = 0.28;
-    const torso = box(0.7, 0.8, 0.6, body, 0, 0.95, 0);
-    const head = box(0.5, 0.36, 0.5, body, 0, 1.55, 0);
-    const eye = box(0.08, 0.12, 0.36, glow(COLORS.guardianEye, 2.5), 0.26, 1.57, 0);
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), glow(col, 2.5));
-    tip.position.y = 1.98;
-    g.add(wheel, torso, head, eye, box(0.04, 0.3, 0.04, std(0x9090a0), 0, 1.82, 0), tip);
-    return {
-        group: g,
-        pose: (t) => {
-            wheel.rotation.y = t * 8;
-            head.rotation.y = Math.sin(t * 2) * 0.3;
-            torso.position.y = 0.95 + Math.abs(Math.sin(t * 8)) * 0.04;
-        },
-    };
-}
-
-function crawlerModel(col: THREE.Color): { group: THREE.Group; pose: Pose } {
-    const g = new THREE.Group();
-    const shell = std(col, { roughness: 0.5 });
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 8), shell);
-    body.scale.set(1.2, 0.75, 1);
-    body.position.y = 0.6;
-    g.add(body);
-    const legs: THREE.Group[] = [];
-    for (let i = 0; i < 6; i++) {
-        const l = limb(0.07, 0.55, std(col.clone().multiplyScalar(0.6)), -0.3 + (i % 3) * 0.3, 0.6);
-        l.position.z = i < 3 ? 0.32 : -0.32;
-        l.rotation.x = i < 3 ? -0.7 : 0.7;
-        legs.push(l);
-        g.add(l);
-    }
-    g.add(
-        box(0.1, 0.1, 0.1, glow(COLORS.guardianEye, 3), 0.48, 0.7, 0.14),
-        box(0.1, 0.1, 0.1, glow(COLORS.guardianEye, 3), 0.48, 0.7, -0.14)
-    );
-    return {
-        group: g,
-        pose: (t) => legs.forEach((l, i) => (l.rotation.z = Math.sin(t * 12 + i * 2) * 0.4)),
-    };
-}
-
-function blobModel(col: THREE.Color): { group: THREE.Group; pose: Pose } {
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(0.55, 1),
-        std(col, {
-            transparent: true,
-            opacity: 0.85,
-            roughness: 0.15,
-            emissive: col,
-            emissiveIntensity: 0.25,
-            flatShading: true,
-        })
-    );
-    body.position.y = 0.55;
-    g.add(body);
-    const eyes = new THREE.Group();
-    eyes.add(
-        box(0.12, 0.16, 0.12, glow(0xffffff, 2), 0.4, 0.75, 0.16),
-        box(0.12, 0.16, 0.12, glow(0xffffff, 2), 0.4, 0.75, -0.16)
-    );
-    g.add(eyes);
-    return {
-        group: g,
-        pose: (t) => {
-            const s = Math.sin(t * 7);
-            body.scale.set(1 + s * 0.12, 1 - s * 0.15, 1 + s * 0.12);
-            body.position.y = 0.55 - s * 0.08;
-            eyes.position.y = -s * 0.1;
-        },
-    };
-}
-
-function batModel(col: THREE.Color): { group: THREE.Group; pose: Pose } {
-    const g = new THREE.Group();
-    const fur = std(col, { roughness: 0.9 });
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8), fur);
-    body.position.y = 1;
-    const wings = [new THREE.Group(), new THREE.Group()];
-    wings.forEach((w, i) => {
-        w.position.set(0, 1.05, i ? 0.25 : -0.25);
-        const m = box(
-            0.7,
-            0.04,
-            0.6,
-            std(col.clone().multiplyScalar(0.5), { side: THREE.DoubleSide }),
-            0,
-            0,
-            i ? 0.3 : -0.3
-        );
-        w.add(m);
-        g.add(w);
-    });
-    g.add(
-        body,
-        box(0.08, 0.08, 0.08, glow(COLORS.guardianEye, 3), 0.28, 1.08, 0.1),
-        box(0.08, 0.08, 0.08, glow(COLORS.guardianEye, 3), 0.28, 1.08, -0.1)
-    );
-    return {
-        group: g,
-        pose: (t) => {
-            const f = Math.sin(t * 16) * 0.8;
-            wings[0].rotation.x = f;
-            wings[1].rotation.x = -f;
-            body.position.y = 1 + Math.sin(t * 4) * 0.1;
-        },
-    };
-}
-
-function droneModel(col: THREE.Color): { group: THREE.Group; pose: Pose } {
-    const g = new THREE.Group();
-    const core = box(0.7, 0.7, 0.7, std(col, { metalness: 0.6, roughness: 0.3 }), 0, 1, 0);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.05, 6, 24), glow(col, 2.2));
-    ring.position.y = 1;
-    const eye = box(0.2, 0.2, 0.2, glow(COLORS.guardianEye, 3), 0, 1, 0.36);
-    g.add(core, ring, eye);
-    return {
-        group: g,
-        pose: (t) => {
-            core.rotation.set(t * 1.3, t * 1.7, 0);
-            ring.rotation.set(Math.PI / 2 + Math.sin(t * 2) * 0.4, 0, t * 3);
-        },
-    };
 }
 
 // ---- Textures -----------------------------------------------------------------------------------
