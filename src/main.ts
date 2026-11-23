@@ -35,7 +35,7 @@ import { applyUiColors, COLORS } from "./core/palette";
 import { markHelpSeen, record, save } from "./core/save";
 import { isMuted, setMusicIntensity, sfx, toggleMute, unlock } from "./fx/audio";
 import { clearInput, HELP, isTouch, pollPads, readInput, setPadHandler, setupInput } from "./player/input";
-import { detectTier, TIER_SETTINGS } from "./render/tier";
+import { detectTier, Governor, TIER_SETTINGS, type TierSettings } from "./render/tier";
 import { animatePreviews } from "./render/preview";
 import { View } from "./render/view";
 import { drawHud, message } from "./ui/hud";
@@ -68,6 +68,11 @@ const ARROWS: Record<string, [number, number]> = {
 };
 
 let view: View;
+let settings: TierSettings;
+let governor: Governor;
+/** Frame-rate cap bookkeeping: time owed since the last rendered frame. */
+let owed = 0;
+let lastRender = 0;
 let attract: Game;
 let game: Game | null = null;
 let paused = false;
@@ -110,7 +115,12 @@ async function startup() {
         );
     document.documentElement.dataset.tier = tier;
     await step(1);
-    view = new View($("#app"), TIER_SETTINGS[tier]);
+    settings = TIER_SETTINGS[tier];
+    view = new View($("#app"), settings);
+    governor = new Governor(() => view.degrade());
+    view.onContextLost = () => {
+        if (game && !paused && game.phase !== "over") showPause("pause");
+    };
     await step(2);
     attract = new Game(0, { demo: true });
     view.sync(attract, 0);
@@ -265,13 +275,27 @@ function togglePause() {
 }
 
 function frame(now: number) {
+    requestAnimationFrame(frame);
+    // Cap the render rate (phones and tablets: 60 fps even on 90 / 120 Hz screens; the game
+    // ticks at 40 Hz, so more frames only cost heat and battery). Time owed carries over, so a
+    // 90 Hz screen still averages 60.
+    if (settings.maxFps) {
+        owed += now - lastRender;
+        lastRender = now;
+        const min = 1000 / settings.maxFps;
+        if (owed < min - 1) return;
+        owed = Math.min(owed - min, min);
+    }
     const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
+    // The governor watches steady play only (menus and pauses idle; cavern builds hitch).
+    if (game && !paused && game.phase === "play") governor.frame(now - last);
     last = now;
     if (game) {
         if (!paused) game.update(dt, readInput());
         else pollPads();
         if (game.n !== shownN) {
             shownN = game.n;
+            governor.reset();
             const c = game.cavern;
             const feats = [
                 c.tiles.includes("~") && "crumbling ledges",
@@ -290,7 +314,6 @@ function frame(now: number) {
         if (attract.time > ATTRACT_SECONDS) attract = new Game((attract.n + 1) % 20, { demo: true });
     }
     view.sync(game ?? attract, game && paused ? 0 : dt);
-    requestAnimationFrame(frame);
 }
 
 function inMenu() {
@@ -328,6 +351,7 @@ function wireEvents() {
     $("#t-pause").addEventListener("pointerdown", (e) => (e.preventDefault(), togglePause()));
     addEventListener("blur", clearInput);
     document.addEventListener("visibilitychange", () => {
+        governor?.reset();
         if (document.hidden && game && !paused && game.phase !== "over") showPause("pause");
     });
     $(".ls-controls").textContent = isTouch

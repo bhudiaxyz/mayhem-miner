@@ -127,17 +127,39 @@ export class View {
     private theme!: Theme;
     private m4 = new THREE.Matrix4();
     private v3 = new THREE.Vector3();
+    private ao?: GTAOPass;
+    private bloom?: UnrealBloomPass;
+    /** Governor's resolution scale (1 = the tier's full DPR). */
+    private dprScale = 1;
+    /** GPU context lost (mobile background / memory pressure): skip rendering until restored. */
+    private lost = false;
+    /** Ground-level blob shadows: the miner's, one per guardian, and static ones (crystals, props). */
+    private blobTex = blobTexture();
+    private minerBlob!: THREE.Mesh;
+    private guardianBlobs: THREE.Mesh[] = [];
+    /** Called when the GPU context is lost (main.ts pauses the run). */
+    onContextLost = () => {};
 
     constructor(
         host: HTMLElement,
         private ts: TierSettings
     ) {
         this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
-        this.renderer.setPixelRatio(Math.min(devicePixelRatio, ts.dprCap));
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.05;
         this.renderer.shadowMap.enabled = ts.shadowMap > 0;
+        this.renderer.shadowMap.type = ts.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
         host.append(this.renderer.domElement);
+        // Mobile browsers drop the GPU context under memory pressure or in the background. Calling
+        // preventDefault lets it be restored (three.js re-uploads everything lazily); until then
+        // nothing renders, and main.ts pauses the run.
+        const el = this.renderer.domElement;
+        el.addEventListener("webglcontextlost", (e) => {
+            e.preventDefault();
+            this.lost = true;
+            this.onContextLost();
+        });
+        el.addEventListener("webglcontextrestored", () => (this.lost = false));
 
         this.scene.background = new THREE.Color(COLORS.ui.bg);
         this.scene.add(this.hemi);
@@ -154,6 +176,14 @@ export class View {
             this.key.shadow.bias = -0.0005;
             this.key.shadow.normalBias = 0.03;
         }
+        // High tier: the helmet torch casts shadows too (ledges and creatures throw them ahead).
+        if (ts.shadowMap && ts.torchShadow) {
+            this.torch.castShadow = true;
+            this.torch.shadow.mapSize.set(512, 512);
+            this.torch.shadow.camera.near = 0.2;
+            this.torch.shadow.bias = -0.002;
+            this.torch.shadow.normalBias = 0.04;
+        }
         this.scene.add(
             this.key,
             this.key.target,
@@ -164,10 +194,18 @@ export class View {
             this.torch.target
         );
         this.miner = minerModel();
-        this.scene.add(this.miner.group);
+        this.minerBlob = this.makeBlob(0.85);
+        this.scene.add(this.miner.group, this.minerBlob);
         this.effects = new Effects(this.scene, ts.particles);
 
-        const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: ts.msaa });
+        // HDR (half-float) target where the GPU can render to it; some older Android GPUs can't, and
+        // would show nothing, so they get 8-bit (glows clip a little, everything else is the same).
+        const ext = this.renderer.extensions;
+        const hdrOk = ext.has("EXT_color_buffer_float") || ext.has("EXT_color_buffer_half_float");
+        const target = new THREE.WebGLRenderTarget(1, 1, {
+            type: hdrOk ? THREE.HalfFloatType : THREE.UnsignedByteType,
+            samples: ts.msaa,
+        });
         this.composer = new EffectComposer(this.renderer, target);
         this.composer.addPass(new RenderPass(this.scene, this.camera));
         if (ts.ao) {
@@ -175,8 +213,12 @@ export class View {
             ao.updateGtaoMaterial({ radius: 0.6, thickness: 1 });
             ao.blendIntensity = 0.8;
             this.composer.addPass(ao);
+            this.ao = ao;
         }
-        if (ts.bloom) this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), BLOOM_STRENGTH, 0.4, 0.85));
+        if (ts.bloom) {
+            this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), BLOOM_STRENGTH, 0.4, 0.85);
+            this.composer.addPass(this.bloom);
+        }
         this.composer.addPass(new OutputPass());
         this.resize();
         // The host's size is set by CSS (on portrait phones it leaves room for the controls).
@@ -187,6 +229,10 @@ export class View {
         const host = this.renderer.domElement.parentElement!;
         const w = Math.max(1, host.clientWidth),
             h = Math.max(1, host.clientHeight);
+        // DPR: the tier cap, lowered further to keep big screens (iPad Pro, 4K) under the pixel
+        // budget, times the governor's scale.
+        const budget = Math.sqrt(this.ts.maxPixels / (w * h));
+        this.renderer.setPixelRatio(Math.max(0.6, Math.min(devicePixelRatio, this.ts.dprCap, budget) * this.dprScale));
         this.renderer.setSize(w, h);
         this.composer.setPixelRatio(this.renderer.getPixelRatio());
         this.composer.setSize(w, h);
@@ -202,6 +248,71 @@ export class View {
         this.camera.position.copy(this.camBase).add(this.camDrift);
         this.camera.lookAt(this.camLook);
         this.camera.updateProjectionMatrix();
+    }
+
+    /** A soft dark patch, lying flat on whatever is below; opacity is lower where shadow maps exist. */
+    private makeBlob(size: number) {
+        const m = new THREE.Mesh(
+            BLOB_GEO,
+            new THREE.MeshBasicMaterial({
+                map: this.blobTex,
+                transparent: true,
+                depthWrite: false,
+                opacity: this.ts.shadowMap ? 0.35 : 0.55,
+                color: 0x000000,
+            })
+        );
+        m.userData.size = size;
+        m.userData.alpha = m.material.opacity;
+        m.renderOrder = 1;
+        return m;
+    }
+
+    /**
+     * Put a blob on the first surface at or below world (x, feetY): rock, ledge, crumble, belt or
+     * a closed door, read from the live tiles (so it drops when a ledge crumbles or a door opens).
+     * It shrinks and fades with height, and is hidden with nothing below.
+     */
+    private placeBlob(b: THREE.Mesh, tiles: string | string[], x: number, feetY: number, scale = 1) {
+        const c = Math.min(W - 1, Math.max(0, Math.floor(x)));
+        let top = -1;
+        for (let r = Math.max(0, Math.ceil(H - feetY - 0.05)); r < H; r++)
+            if ("#=~<>D".includes(tiles[r * W + c])) {
+                top = H - r;
+                break;
+            }
+        const h = feetY - top;
+        b.visible = top >= 0 && h > -0.1 && scale > 0.05;
+        if (!b.visible) return;
+        const k = Math.max(0.25, 1 - h / 7);
+        b.position.set(x, top + 0.015, 0);
+        b.scale.setScalar(b.userData.size * k * scale);
+        (b.material as THREE.MeshBasicMaterial).opacity = b.userData.alpha * k;
+    }
+
+    /**
+     * One step down in quality, for the Governor (render/tier.ts), cheapest-to-lose first:
+     * ambient occlusion, then resolution (×0.8 a step down to DPR 1), then bloom, then shadows.
+     * Returns false when there is nothing left to shed.
+     */
+    degrade(): boolean {
+        const step = (what: string) => (console.info(`[mayhem-miner] smoother frames: ${what}`), true);
+        if (this.ao?.enabled) return ((this.ao.enabled = false), step("ambient occlusion off"));
+        if (this.renderer.getPixelRatio() > 1.01) {
+            this.dprScale *= 0.8;
+            this.resize();
+            return step(`resolution ×${this.renderer.getPixelRatio().toFixed(2)}`);
+        }
+        if (this.bloom?.enabled) return ((this.bloom.enabled = false), step("bloom off"));
+        if (this.renderer.shadowMap.enabled) {
+            this.renderer.shadowMap.enabled = this.key.castShadow = this.torch.castShadow = false;
+            this.scene.traverse((o) => {
+                const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+                if (m) for (const mm of Array.isArray(m) ? m : [m]) mm.needsUpdate = true;
+            });
+            return step("shadows off");
+        }
+        return false;
     }
 
     /**
@@ -289,6 +400,7 @@ export class View {
             // A lift's anchor is the top of its range (a spider's silk runs up to it).
             const reach = gd.kind === "lift" ? (y - gd.min) / 8 / SPRITE + 2 / SPRITE : 0;
             v.pose({ dt, t, phase: v.dist * STRIDE, mode: "walk", land: 0, reach });
+            this.placeBlob(this.guardianBlobs[i], g.tiles, x / 8 + 0.5, H - y / 8 - 2);
         });
 
         const m = g.miner;
@@ -297,6 +409,7 @@ export class View {
         const since = g.phase === "dead" ? DEAD_PAUSE - g.timer + a * TICK : Infinity;
         const show = !g.demo && (g.phase === "play" || (g.phase === "complete" && g.air > 0) || since < TUMBLE);
         mg.visible = show;
+        this.minerBlob.visible = show;
         // Already falling too far to survive: flail and blink the lamp red.
         const doomed = g.phase === "play" && m.mode !== "ground" && m.y - m.apex > FALL_LIMIT;
         let x = W / 2,
@@ -318,6 +431,7 @@ export class View {
             }
             mg.position.set(x, y, 0);
             mg.scale.setScalar(s * SPRITE);
+            this.placeBlob(this.minerBlob, g.tiles, x, y, s);
             // Legs follow distance walked, interpolated to the drawn position (not 40 Hz steps).
             const walk = m.walk - Math.abs(m.x - m.px) * (1 - a);
             const ground = m.mode === "ground";
@@ -365,7 +479,7 @@ export class View {
         }
 
         this.effects.update(dt);
-        this.composer.render();
+        if (!this.lost) this.composer.render();
     }
 
     private build(cv: Cavern, n: number) {
@@ -633,6 +747,21 @@ export class View {
             this.level.add(v.group, patrolZone(gd, col));
             return { ...v, dist: 0, last: gd.kind === "lift" ? gd.y : gd.x };
         });
+        // Ground-level shadows (every tier): moving ones are placed in sync, static ones here.
+        this.guardianBlobs = cv.guardians.map(() => {
+            const b = this.makeBlob(0.9);
+            this.level.add(b);
+            return b;
+        });
+        const still = (wx: number, feet: number, size: number) => {
+            const b = this.makeBlob(size);
+            this.level.add(b);
+            this.placeBlob(b, cv.tiles, wx, feet);
+        };
+        cv.crystals.forEach(([c, r]) => still(c + 0.5, H - r - 1, 0.5));
+        cv.levers.forEach(([c, r]) => still(c + 0.5, H - r - 1, 0.6));
+        still(cv.portal.c + 1, H - cv.portal.r - 2, 2);
+        cells("^").forEach((i) => still((i % W) + 0.5, H - Math.floor(i / W) - 1, 0.9));
         this.miner.group.traverse((o) => (o.castShadow = this.ts.shadowMap > 0 && !o.userData.fx));
     }
 }
@@ -652,6 +781,24 @@ function patrolZone(gd: Guardian, col: THREE.Color) {
     );
     m.position.set((x0 + x1) / 16, H - (y0 + y1) / 16, -DEPTH / 2 - 0.01);
     return m;
+}
+
+/** A blob shadow's quad: flat on the ground, wider than deep (x by z). */
+const BLOB_GEO = new THREE.PlaneGeometry(1, DEPTH * 0.55).rotateX(-Math.PI / 2);
+
+function blobTexture() {
+    const c = document.createElement("canvas");
+    c.width = c.height = 64;
+    const g = c.getContext("2d")!;
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, "rgba(255,255,255,1)");
+    grad.addColorStop(0.5, "rgba(255,255,255,0.55)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
 }
 
 // Plain box mesh, for the portal frame.

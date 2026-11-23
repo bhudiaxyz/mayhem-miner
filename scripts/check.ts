@@ -18,6 +18,9 @@
  *      becomes bonus; crumbling ledges give way; levers open doors; spikes and guardians kill;
  *      running out of air kills; lives run out into game over; extra life at 10,000.
  *   5. Voxel characters: the face builder emits only air-facing faces.
+ *   6. GPU tiers on real devices' renderer strings (Galaxy S22 Ultra, iPad / iPhone, 2019
+ *      phones, Intel / NVIDIA / Apple laptops, software GL); the governor degrades only on
+ *      sustained slow frames (not iOS Low Power Mode's 30 fps) and stops when out of steps.
  *
  * Usage
  *   npm run check (exits non-zero on the first failure).
@@ -31,6 +34,7 @@ import { solve } from "../src/world/solver";
 import { Game } from "../src/core/game";
 import { stepBody, type Body } from "../src/core/physics";
 import { voxelFaces } from "../src/render/characters";
+import { classifyGpu, Governor, type Tier } from "../src/render/tier";
 import { difficulty, MAX_DIFFICULTY_AT, type Difficulty } from "../src/core/difficulty";
 
 const idle = { left: false, right: false, jump: false };
@@ -236,6 +240,43 @@ function lab(rows: string[]) {
     assert.equal(two.solid.pos.length / 18, 5, "shared face hidden, painted voxel replaced");
     assert.equal(two.glow.pos.length / 18, 5, "glow voxel has its own faces");
     assert.equal(voxelFaces([[0, 0, 0, 3, 3, 3, 0xffffff]]).solid.pos.length / 18, 54, "3³ cube: surface only");
+}
+
+// 6. GPU tiers, on the renderer strings real devices report (WebGL UNMASKED_RENDERER_WEBGL).
+{
+    const tier = (renderer: string, mobile: boolean, cores = 8, memGB?: number) =>
+        classifyGpu({ renderer, mobile, cores, memGB });
+    const cases: [string, Tier][] = [
+        [tier("Adreno (TM) 730", true), "mobile-high"], // Galaxy S22 Ultra (Snapdragon 8 Gen 1)
+        [tier("Samsung Xclipse 920", true), "mobile-high"], // Galaxy S22 Ultra (Exynos 2200)
+        [tier("Apple GPU", true, 6), "mobile-high"], // any iPad / iPhone (Safari masks the GPU)
+        [tier("Adreno (TM) 640", true), "mid"], // 2019 flagship (Snapdragon 855)
+        [tier("Mali-G76 MP12", true), "mid"], // Galaxy S10 (Exynos 9820)
+        [tier("Adreno (TM) 618", true), "low"], // 2019 mid-range
+        [tier("Mali-G72 MP3", true), "low"],
+        [tier("PowerVR Rogue GE8320", true, 8), "low"], // budget MediaTek, despite 8 cores
+        [tier("ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)", false), "high"],
+        [tier("ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11)", false), "mid"],
+        [tier("ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)", false), "mid"],
+        [tier("ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)", false), "low"],
+        [tier("Apple M1", false), "high"], // Chrome on Apple Silicon
+        [tier("Apple GPU", false, 8), "high"], // Safari on Apple Silicon
+        [tier("Apple GPU", false, 4), "mid"], // Safari on a 2019 Intel MacBook
+        [tier("ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)", false), "low"],
+        [tier("Adreno (TM) 730", true, 8, 2), "low"], // 2 GB of memory overrides the GPU
+    ];
+    cases.forEach(([got, want], i) => assert.equal(got, want, `tier case ${i}`));
+
+    // The governor steps down only after a sustained slow window, and stops when out of steps.
+    let steps = 0;
+    const gov = new Governor(() => ++steps < 3);
+    for (let i = 0; i < 200; i++) gov.frame(16.7); // 60 fps: fine
+    for (let i = 0; i < 90; i++) gov.frame(33.4); // 30 fps (iOS Low Power Mode cap): not slow
+    assert.equal(steps, 0, "smooth or 30 fps-capped frames never degrade");
+    for (let i = 0; i < 200; i++) gov.frame(50); // 20 fps: a step per 3 s window
+    assert.equal(steps, 3, "slow frames step down, then stop when nothing is left");
+    gov.frame(5000); // a stall (tab switch) is ignored
+    assert.equal(steps, 3);
 }
 
 console.log("check: all passed");
