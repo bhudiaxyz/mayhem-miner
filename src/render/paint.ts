@@ -8,6 +8,7 @@
  * Operations
  *   - seedOf(name): FNV-1a hash of a cavern name, the seed for everything below.
  *   - canvasTex(size, paint, seed): a nearest-filtered, repeating canvas texture.
+ *   - tileTextures(): the fixed ledge, crumble, belt and door tiles (painted once).
  *   - rockTexture(style, seed): a 16 × 16 greyscale rock tile (tinted per block instance):
  *     mottled, strata, fractured, cobble or crystal.
  *   - backdropTextures(theme, seed): the back wall, 16 px per cell, in three layers:
@@ -462,4 +463,85 @@ export function backdropTextures(th: Theme, seed: number) {
     glowTex.colorSpace = THREE.SRGBColorSpace;
     map.wrapS = map.wrapT = THREE.ClampToEdgeWrapping;
     return { map, glow: glowTex };
+}
+
+// ---- Fixed tiles ------------------------------------------------------------------------------------
+
+/**
+ * The fixed 16 × 16 tiles, painted once: planked ledge, rubble crumble, chevron belt, banded
+ * door. (The rock tile is per cavern: rockTexture.) Tinted per instance; each doubles as its bump map.
+ */
+export function tileTextures() {
+    return {
+        ledge: canvasTex(
+            16,
+            (g, r) => {
+                g.fillStyle = "#d8d8d8";
+                g.fillRect(0, 0, 16, 16);
+                speckle(g, r, 30, 170, 250);
+                g.fillStyle = "rgba(0,0,0,0.3)";
+                for (const y of [5, 11]) g.fillRect(0, y, 16, 1);
+                g.fillRect(7, 0, 1, 5);
+                g.fillRect(12, 6, 1, 5);
+                bevel(g);
+            },
+            4243
+        ),
+        crumble: canvasTex(
+            16,
+            (g, r) => {
+                // Loose rubble: uneven chips of light and dark grit, split by dark cracks and pits.
+                g.fillStyle = "#8a8a8a";
+                g.fillRect(0, 0, 16, 16);
+                for (let i = 0; i < 18; i++) {
+                    const v = Math.floor(120 + r() * 120);
+                    g.fillStyle = `rgb(${v},${v},${v})`;
+                    g.fillRect(
+                        Math.floor(r() * 15),
+                        Math.floor(r() * 15),
+                        2 + Math.floor(r() * 2),
+                        1 + Math.floor(r() * 2)
+                    );
+                }
+                g.fillStyle = "rgba(0,0,0,0.7)";
+                for (let i = 0; i < 3; i++) {
+                    let x = Math.floor(r() * 16);
+                    for (let y = 0; y < 16; y++) {
+                        g.fillRect(x, y, 1, 1);
+                        if (r() < 0.4) x = (x + (r() < 0.5 ? 15 : 1)) % 16;
+                    }
+                }
+                for (let i = 0; i < 6; i++) g.fillRect(Math.floor(r() * 16), Math.floor(r() * 16), 1, 1);
+                speckle(g, r, 40, 40, 240);
+            },
+            4244
+        ),
+        belt: canvasTex(
+            16,
+            (g) => {
+                g.fillStyle = "#909090";
+                g.fillRect(0, 0, 16, 16);
+                g.fillStyle = "#e8e8e8";
+                for (let x = 0; x < 16; x += 8) for (let y = 0; y < 16; y++) g.fillRect((x + y) % 16, y, 3, 1);
+                g.fillStyle = "#404040";
+                g.fillRect(0, 0, 16, 1);
+                g.fillRect(0, 15, 16, 1);
+            },
+            4245
+        ),
+        door: canvasTex(
+            16,
+            (g) => {
+                g.fillStyle = "#c0c0c0";
+                g.fillRect(0, 0, 16, 16);
+                g.fillStyle = "#707070";
+                for (const x of [3, 8, 13]) g.fillRect(x, 0, 1, 16);
+                g.fillStyle = "#f0f0f0";
+                g.fillRect(0, 3, 16, 2);
+                g.fillRect(0, 11, 16, 2);
+                bevel(g);
+            },
+            4246
+        ),
+    };
 }

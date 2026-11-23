@@ -495,9 +495,10 @@ Then the gauge reads full ("Ready"), the loop starts and the main menu shows. An
 
 - **`npm run check`** (`scripts/check.ts`, Node's native TypeScript; `ts-resolve.mjs` adds `.ts` to extensionless imports) asserts:
     1. There are 20 hand-built caverns; each parses to 32 × 16, starts on solid ground, has at least five crystals and no guardian sweeping within two cells of the start, and **the solver reaches every crystal, every lever and the portal**. It prints per-cavern crystal, guardian and state counts with timings.
-    2. Generated caverns 20–59 are produced, have at least five crystals, solve, and round-trip through the parser.
+    2. Generated caverns 20–109 are produced, have at least five crystals, solve, and round-trip through the parser. The difficulty curve never eases from one cavern to the next, saturates at cavern 100, keeps band 1 gentle and steps up each band; no fliers before cavern 31, no sprinters before 41, and both do appear in their band.
     3. Movement: a standing jump rises exactly 26 px and lands where it started; a belt carries you and walking against it holds still; a six-cell drop is survived and an eight-cell drop kills.
     4. Rules, on small lab caverns: crystals score and the last one opens the portal; the portal completes the cavern, air is paid out as bonus and the next cavern loads; crumbling ledges give way; levers open doors; spikes, guardians and running out of air kill; deaths spend lives and the last one ends the game; an extra life arrives at 10,000.
+    5. Voxel characters: the face builder emits only air-facing faces and puts glowing voxels in their own set.
 - **`python scripts/smoke.py [out_dir]`**: Playwright (Chromium on SwiftShader) against `npm run preview` at `?tier=low`, on a 1280 × 720 desktop, a 412 × 860 portrait touch phone and an 860 × 412 landscape touch phone. Each run boots to the menu with every item on screen, starts a new game, walks (keyboard, or by dragging the touch joystick; the jump button presses and releases), jumps (desktop), pauses and resumes, with no page errors. Screenshots go to `shots/` (git-ignored). Software GL is slow, so the checks poll `window.__game` instead of sleeping.
 - **`npm run typecheck`** and **`npm run format`** (Prettier with the repo's `.prettierrc`).
 

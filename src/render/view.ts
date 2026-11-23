@@ -44,6 +44,7 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { CRUMBLE_TICKS, DEAD_PAUSE, type Game } from "../core/game";
 import { FALL_LIMIT, JUMP, TICK } from "../core/physics";
 import { COLORS, hdr, themeFor, type Theme } from "../core/palette";
@@ -51,7 +52,8 @@ import { rng } from "../core/random";
 import { H, W, type Cavern, type Guardian } from "../world/caverns";
 import { Effects } from "../fx/effects";
 import type { TierSettings } from "./tier";
-import { backdropTextures, canvasTex, rockTexture, seedOf } from "./paint";
+import { backdropTextures, rockTexture, seedOf, tileTextures } from "./paint";
+import { crumbleGeometry } from "./props";
 import { guardianModel, minerModel, TORCH_GLOW, type Character, type Miner, type Mode } from "./characters";
 
 const DEPTH = 1.2; // block depth (z)
@@ -75,6 +77,8 @@ const BACKDROP_GLOW = 0.35;
 const BLOOM_STRENGTH = 0.45;
 /** HDR strength of the thin glowing strip along every ledge top (1 = just under bloom). */
 const EDGE_GLOW = 1.05;
+/** Crumbling ledges' broken strip, as a fraction of EDGE_GLOW: dimmer, so it reads as unsafe. */
+const CRUMBLE_STRIP = 0.55;
 /** HDR strength of the floating crystals (bloom picks up anything above 1). */
 const CRYSTAL_GLOW = 2.4 * 0.85;
 /** Seconds a landing squash takes to spring back. */
@@ -101,7 +105,7 @@ export class View {
     private camDrift = new THREE.Vector3();
     private level = new THREE.Group();
     private built: Cavern | null = null;
-    private tex = textures();
+    private tex = tileTextures();
     /** Ambient fill, tinted per cavern theme (sky from above, ground from below). */
     private hemi = new THREE.HemisphereLight(0xc8d4ff, 0x40302a, 1.5);
     /** Textures painted for the current cavern (rock, back wall), disposed on the next build. */
@@ -109,6 +113,7 @@ export class View {
     // Per-cavern handles, set by build().
     private crumble!: THREE.InstancedMesh;
     private crumbleCells: number[] = [];
+    private crumbleStrips!: THREE.InstancedMesh;
     private doors!: THREE.Group;
     private crystals: THREE.Mesh[] = [];
     private levers: THREE.Group[] = [];
@@ -235,8 +240,16 @@ export class View {
             const shake = w > 0 && w < 1 ? (Math.random() - 0.5) * 0.06 : 0;
             this.m4.makeScale(1, s, 1).setPosition(c + 0.5 + shake, H - r - 0.16 - w * 0.25, 0);
             this.crumble.setMatrixAt(k, this.m4);
+            // Its glow strip rides the top of the sinking slab and goes with it.
+            this.m4
+                .makeScale(s ? 1 : 0, s ? 1 : 0, s ? 1 : 0)
+                .setPosition(c + 0.5 + shake, H - r + 0.01 - w * 0.25 - 0.32 * (1 - s) * 0.5, DEPTH / 2 + 0.02);
+            this.crumbleStrips.setMatrixAt(k, this.m4);
         });
-        if (this.crumbleCells.length) this.crumble.instanceMatrix.needsUpdate = true;
+        if (this.crumbleCells.length) {
+            this.crumble.instanceMatrix.needsUpdate = true;
+            this.crumbleStrips.instanceMatrix.needsUpdate = true;
+        }
         this.doors.visible = !g.doorsOpen;
         for (const b of this.belts) b.offset.x -= (b.userData.dir as number) * dt * 1.2;
 
@@ -441,7 +454,7 @@ export class View {
         this.crumbleCells = cells("~");
         this.crumble = blocks(
             this.crumbleCells,
-            slab.clone(),
+            crumbleGeometry(),
             new THREE.MeshStandardMaterial({
                 map: this.tex.crumble,
                 bumpMap: this.tex.crumble,
@@ -487,7 +500,7 @@ export class View {
         // Neon edge strips on every surface you can stand on.
         const tops: number[] = [];
         for (let i = 0; i < tiles.length; i++)
-            if ("#=~<>".includes(tiles[i]) && !"#D".includes(at(i % W, Math.floor(i / W) - 1)) && i >= W) tops.push(i);
+            if ("#=<>".includes(tiles[i]) && !"#D".includes(at(i % W, Math.floor(i / W) - 1)) && i >= W) tops.push(i);
         const strips = new THREE.InstancedMesh(
             new THREE.BoxGeometry(1.02, 0.05, 0.05),
             new THREE.MeshBasicMaterial({ color: hdr(th.glow, EDGE_GLOW), toneMapped: false }),
@@ -498,6 +511,17 @@ export class View {
             this.m4.makeTranslation((i % W) + 0.5, H - Math.floor(i / W) + 0.01, DEPTH / 2 + 0.02);
             strips.setMatrixAt(k, this.m4);
         });
+        // Crumbling ledges: a dimmer, broken strip (one per crumble cell, posed with its wear in sync).
+        const dash = mergeGeometries(
+            [-0.33, 0, 0.33].map((x) => new THREE.BoxGeometry(0.22, 0.05, 0.05).translate(x, 0, 0))
+        );
+        this.crumbleStrips = new THREE.InstancedMesh(
+            dash,
+            new THREE.MeshBasicMaterial({ color: hdr(th.glow, EDGE_GLOW * CRUMBLE_STRIP), toneMapped: false }),
+            Math.max(1, this.crumbleCells.length)
+        );
+        this.crumbleStrips.count = this.crumbleCells.length;
+        this.level.add(this.crumbleStrips);
         this.level.add(strips);
 
         // Spikes: two cones per cell, pointing away from whatever they grow on.
@@ -639,79 +663,4 @@ function box(w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0,
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     m.position.set(x, y, z);
     return m;
-}
-
-// ---- Textures -----------------------------------------------------------------------------------
-// Tiny greyscale pixel-art tiles, tinted per instance; nearest filtering keeps them crisp.
-
-function textures() {
-    const speckle = (g: CanvasRenderingContext2D, r: () => number, n: number, lo: number, hi: number) => {
-        for (let i = 0; i < n; i++) {
-            const v = Math.floor(lo + r() * (hi - lo));
-            g.fillStyle = `rgb(${v},${v},${v})`;
-            g.fillRect(Math.floor(r() * 16), Math.floor(r() * 16), 1, 1);
-        }
-    };
-    const bevel = (g: CanvasRenderingContext2D) => {
-        g.fillStyle = "rgba(255,255,255,0.35)";
-        g.fillRect(0, 0, 16, 1);
-        g.fillRect(0, 0, 1, 16);
-        g.fillStyle = "rgba(0,0,0,0.45)";
-        g.fillRect(0, 15, 16, 1);
-        g.fillRect(15, 0, 1, 16);
-    };
-    return {
-        ledge: canvasTex(
-            16,
-            (g, r) => {
-                g.fillStyle = "#d8d8d8";
-                g.fillRect(0, 0, 16, 16);
-                speckle(g, r, 30, 170, 250);
-                g.fillStyle = "rgba(0,0,0,0.3)";
-                for (const y of [5, 11]) g.fillRect(0, y, 16, 1);
-                g.fillRect(7, 0, 1, 5);
-                g.fillRect(12, 6, 1, 5);
-                bevel(g);
-            },
-            4243
-        ),
-        crumble: canvasTex(
-            16,
-            (g, r) => {
-                g.fillStyle = "#b8b8b8";
-                g.fillRect(0, 0, 16, 16);
-                speckle(g, r, 90, 60, 230);
-                g.fillStyle = "rgba(0,0,0,0.55)";
-                for (let i = 0; i < 4; i++) g.fillRect(Math.floor(r() * 16), 0, 1, 6 + Math.floor(r() * 10));
-            },
-            4244
-        ),
-        belt: canvasTex(
-            16,
-            (g) => {
-                g.fillStyle = "#909090";
-                g.fillRect(0, 0, 16, 16);
-                g.fillStyle = "#e8e8e8";
-                for (let x = 0; x < 16; x += 8) for (let y = 0; y < 16; y++) g.fillRect((x + y) % 16, y, 3, 1);
-                g.fillStyle = "#404040";
-                g.fillRect(0, 0, 16, 1);
-                g.fillRect(0, 15, 16, 1);
-            },
-            4245
-        ),
-        door: canvasTex(
-            16,
-            (g) => {
-                g.fillStyle = "#c0c0c0";
-                g.fillRect(0, 0, 16, 16);
-                g.fillStyle = "#707070";
-                for (const x of [3, 8, 13]) g.fillRect(x, 0, 1, 16);
-                g.fillStyle = "#f0f0f0";
-                g.fillRect(0, 3, 16, 2);
-                g.fillRect(0, 11, 16, 2);
-                bevel(g);
-            },
-            4246
-        ),
-    };
 }
