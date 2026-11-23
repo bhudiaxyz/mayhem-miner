@@ -190,11 +190,13 @@ kbd {
         background: color-mix(in srgb, var(--accent) 45%, transparent);
         border-color: var(--accent);
     }
-    #touch [data-k="left"] {
+    /* nipplejs draws the stick inside this zone, which spans the old ◀ ▶ footprint. */
+    #t-stick {
+        position: fixed;
         left: calc(14px + env(safe-area-inset-left));
-    }
-    #touch [data-k="right"] {
-        left: calc(24px + var(--btn) + env(safe-area-inset-left));
+        bottom: calc(14px + var(--safe-b));
+        width: calc(var(--btn) * 2 + 10px);
+        height: var(--btn);
     }
     #touch [data-k="jump"] {
         right: calc(14px + env(safe-area-inset-right));

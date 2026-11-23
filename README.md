@@ -2,7 +2,7 @@
 
 A single-screen cavern platformer for the browser, built with Three.js, TypeScript and Vite. Pip, a night-shift miner, is sealed in a played-out hill with a leaking air tank. Every cavern holds a handful of glowing crystals. Collect them all and the portal lights up, taking you one cavern deeper. Run out of air, touch a guardian, land on spikes or fall too far and you lose a life.
 
-The game is inspired by the early-1980s single-screen platformers, chiefly Matthew Smith's _Manic Miner_ (ZX Spectrum, 1983) and its later Commodore Amiga releases. Their richer colour and music suggested the copper-bar backdrops and chiptune soundtrack here. The caverns, characters, art, sound and code are all original.
+The game is a homage to the early-1980s single-screen platformers, chiefly Matthew Smith's _Manic Miner_ (ZX Spectrum, 1983) and its later Commodore Amiga releases. Their richer colour and music suggested the copper-bar backdrops and chiptune soundtrack here. The caverns, characters, art, sound and code are all original.
 
 ## Highlights
 
@@ -21,8 +21,8 @@ The game is inspired by the early-1980s single-screen platformers, chiefly Matth
 
 | Action         | Keyboard                       | Touch                  | Gamepad                |
 | -------------- | ------------------------------ | ---------------------- | ---------------------- |
-| Walk           | ← → · A D · O P                | ◀ ▶ (slide between)    | Left stick · d-pad ← → |
-| Jump           | Space · ↑ · W (hold to repeat) | ▲, or slide up off ◀ ▶ | A · B · d-pad ↑        |
+| Walk           | ← → · A D · O P                | Joystick ◀ ▶           | Left stick · d-pad ← → |
+| Jump           | Space · ↑ · W (hold to repeat) | ▲, or joystick up      | A · B · d-pad ↑        |
 | Pause / resume | Esc                            | ❚❚                     | Start                  |
 | Sound on / off | M                              | Pause menu             | Pause menu             |
 | Restart cavern | R (while paused)               | Pause menu             | Pause menu             |

@@ -14,6 +14,7 @@
         "format": "prettier --write \"src/**/*.{ts,css}\" \"scripts/**/*.ts\" vite.config.ts index.html"
     },
     "dependencies": {
+        "nipplejs": "^1.0.4",
         "three": "^0.185.1"
     },
     "devDependencies": {

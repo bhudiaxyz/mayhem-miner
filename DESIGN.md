@@ -345,8 +345,8 @@ The rule is that **touch controls never cover the cavern**. `#app` (the canvas h
 | Situation                         | Inset                                                 | Buttons                                           |
 | --------------------------------- | ----------------------------------------------------- | ------------------------------------------------- |
 | Desktop / fine pointer            | none                                                  | none                                              |
-| Touch, portrait (phones, tablets) | `--strip`: a bottom strip of button height + 40 px    | ◀ ▶ bottom-left, ▲ bottom-right, inside the strip |
-| Touch, landscape                  | `--side-l` / `--side-r`: gutters sized to the buttons | ◀ ▶ in the left gutter, ▲ in the right            |
+| Touch, portrait (phones, tablets) | `--strip`: a bottom strip of button height + 40 px    | stick bottom-left, ▲ bottom-right, inside the strip |
+| Touch, landscape                  | `--side-l` / `--side-r`: gutters sized to the buttons | stick in the left gutter, ▲ in the right            |
 
 Button size is `--btn`: `clamp(60px, 11vmax, 96px)` in portrait and `clamp(56px, 15vmin, 88px)` in landscape, so tap targets stay at least 44 px everywhere. Safe-area insets (notches, home bars) are respected. Pause (❚❚) sits top-right. Keyboard hints (`kbd`) hide on coarse pointers. Because the view watches `#app`'s size, the camera simply refits the cavern into whatever room is left.
 
@@ -393,7 +393,8 @@ Without WebGL2, boot explains why instead of failing obscurely.
 All devices feed one `Input { left, right, jump }`:
 
 - **Keyboard**: `KEYS` maps `KeyboardEvent.code`, so bindings are layout-independent: ← → / A D / O P to walk, Space / ↑ / W to jump. Mapped keys `preventDefault` (no page scrolling). A key on a focused menu button is left alone outside a run, so Space and Enter still press menu buttons. Commands (Esc pause, M mute, R restart and Q menu while paused, ↑ ↓ in menus) are handled in `main.ts`.
-- **Touch buttons** (`#touch [data-k]`): each finger is tracked by `pointerId`. `pointerdown` on a button holds its key; on `pointermove` the key follows whatever button is under the finger (`elementFromPoint`), so a thumb can roll from ◀ to ▶ without lifting. Sliding **up off ◀ or ▶** (within 1.5 button heights) holds that direction plus jump: a one-thumb diagonal jump. `pointerup` / `pointercancel` release. They show only during a run on coarse pointers.
+- **Touch joystick** (`#t-stick`, [nipplejs](https://github.com/yoannmoinet/nipplejs) in `static` mode): a stick filling the zone's height. Tilting past 0.3 of its throw walks left or right; pushing up past 0.5 jumps, so up-left / up-right is a one-thumb diagonal jump. A `ResizeObserver` rebuilds it when the zone appears or the screen rotates (its size is `--btn`).
+- **Jump button** (`#touch [data-k=jump]`): held while any finger (`pointerId`) that went down on it is still down. The controls show only during a run on coarse pointers.
 - **Gamepads** (standard mapping, polled every frame): left stick (±0.4 dead zone) or d-pad ← → to walk; A, B or d-pad ↑ to jump. Start, the d-pad, the stick (past ±0.6, as virtual buttons) and A / B also fire edge-triggered `onPadButton` events that main.ts uses to pause and to move through menus.
 - `readInput()` returns a copy of the held state OR'd with the pads. **Holding jump keeps jumping** on every landing, as in the classic genre. A **jump buffer** keeps any fresh jump press alive for 100 ms (4 ticks), so a tap just before landing still jumps. It lives in input, not `stepBody`, so the solver's movement is unchanged.
 - **Menu focus is spatial** (`menuNav(dx, dy)`): arrows, d-pad and stick move to the nearest control in that direction, so the two-column short-screen menu and the cavern grid work in all four directions; with nothing that way, focus steps through document order (wrapping). `clearInput()` releases everything on blur and when dialogs open.

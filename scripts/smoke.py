@@ -46,13 +46,18 @@ def run(p, name, viewport, touch):
     x0 = page.evaluate("window.__game.miner.x")
 
     if touch:
-        right = page.locator('#touch [data-k="right"]')
-        box = right.bounding_box()
-        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-        page.dispatch_event('#touch [data-k="right"]', "pointerdown", {"pointerId": 1, "isPrimary": True})
+        page.wait_for_selector("#t-stick .joystick", state="attached", timeout=10_000)
+        box = page.locator("#t-stick").bounding_box()
+        cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        page.mouse.move(cx, cy)
+        page.mouse.down()
+        page.mouse.move(cx + box["height"], cy, steps=4)
         page.wait_for_function(f"window.__game.miner.x > {x0} + 8", timeout=30_000)
-        page.dispatch_event('#touch [data-k="right"]', "pointerup", {"pointerId": 1, "isPrimary": True})
-        assert not page.is_visible('#touch [data-k="right"].on'), "touch button released"
+        page.mouse.up()
+        page.dispatch_event('#touch [data-k="jump"]', "pointerdown", {"pointerId": 2, "isPrimary": True})
+        assert page.is_visible('#touch [data-k="jump"].on'), "jump button pressed"
+        page.dispatch_event('#touch [data-k="jump"]', "pointerup", {"pointerId": 2, "isPrimary": True})
+        assert not page.is_visible('#touch [data-k="jump"].on'), "jump button released"
     else:
         page.keyboard.down("ArrowRight")
         page.wait_for_function(f"window.__game.miner.x > {x0} + 8", timeout=30_000)

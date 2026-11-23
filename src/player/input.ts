@@ -6,9 +6,9 @@
  *   main.ts one merged snapshot per frame.
  *
  * Operations
- *   - setupInput(): key listeners (KeyboardEvent.code, so layouts don't matter) and the
- *     #touch [data-k] buttons, tracked per finger by position: a thumb can slide from ◀ to ▶,
- *     and sliding up off ◀ / ▶ adds jump (a diagonal jump with one thumb).
+ *   - setupInput(): key listeners (KeyboardEvent.code, so layouts don't matter), the #t-stick
+ *     nipplejs joystick (tilt to walk, push up to jump, so diagonals are one thumb) and the
+ *     #touch [data-k] jump button, tracked per finger.
  *   - readInput(): held keys and buttons OR'd with every connected gamepad (left stick or
  *     d-pad to walk; A, B or d-pad up to jump), plus a 100 ms jump buffer for early taps.
  *   - pollPads(): edge-detected pad buttons (and the stick as a d-pad) for menus and pause.
@@ -25,13 +25,19 @@
  *
  * See also: core/physics.ts (Input), main.ts (pause / menu keys), index.html (#touch); DESIGN.md "13. Input".
  */
+import nipplejs from "nipplejs";
 import type { Input } from "../core/physics";
 
 export const isTouch = matchMedia("(pointer: coarse)").matches;
 
 const held: Input = { left: false, right: false, jump: false };
-/** Keys held by each active touch pointer (pointerId → keys under, or slid up from, it). */
-const touches = new Map<number, (keyof Input)[]>();
+/** Fingers holding the jump button (pointerId). */
+const touches = new Set<number>();
+/** Keys the joystick is tilted towards. */
+let stick: (keyof Input)[] = [];
+/** Joystick dead zones, as a fraction of the stick's throw. */
+const STICK_WALK = 0.3;
+const STICK_JUMP = 0.5;
 const touchHeld: Input = { left: false, right: false, jump: false };
 /** A jump press is remembered this long, so a tap just before landing still jumps (4 ticks). */
 const JUMP_BUFFER_MS = 100;
@@ -56,9 +62,8 @@ const KEY_HELP = [
     ["M", "Sound on / off"],
 ];
 const TOUCH_HELP = [
-    ["◀ ▶", "Walk (slide between them)"],
-    ["▲", "Jump"],
-    ["◀ ▶ slide up", "Jump that way"],
+    ["Stick ◀ ▶", "Walk"],
+    ["▲ · stick up", "Jump (tilt up-left / up-right to jump that way)"],
     ["❚❚", "Pause"],
 ];
 export const HELP = isTouch ? TOUCH_HELP : KEY_HELP;
@@ -71,22 +76,11 @@ export function setPadHandler(fn: typeof onPadButton) {
     onPadButton = fn;
 }
 
-/** Keys for a touch at (x, y): the button under it, or walk + jump when slid up off ◀ / ▶. */
-function keysAt(x: number, y: number): (keyof Input)[] {
-    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("#touch [data-k]");
-    if (el) return [el.dataset.k as keyof Input];
-    for (const b of document.querySelectorAll<HTMLElement>('#touch [data-k="left"], #touch [data-k="right"]')) {
-        const r = b.getBoundingClientRect();
-        if (x >= r.left && x <= r.right && y < r.top && y > r.top - r.height * 1.5)
-            return [b.dataset.k as keyof Input, "jump"];
-    }
-    return [];
-}
-
 function syncTouch() {
     const wasJump = touchHeld.jump;
-    touchHeld.left = touchHeld.right = touchHeld.jump = false;
-    for (const ks of touches.values()) for (const k of ks) touchHeld[k] = true;
+    touchHeld.left = touchHeld.right = false;
+    touchHeld.jump = touches.size > 0;
+    for (const k of stick) touchHeld[k] = true;
     if (touchHeld.jump && !wasJump) jumpAt = performance.now();
     document
         .querySelectorAll<HTMLElement>("#touch [data-k]")
@@ -105,29 +99,49 @@ export function setupInput() {
         const k = KEYS[e.code];
         if (k) held[k] = false;
     });
-    // Track each finger by position, not by the button it went down on, so a thumb can roll
-    // from ◀ to ▶ (or up off them into a diagonal jump) without lifting.
-    document.querySelector("#touch")!.addEventListener("pointerdown", (e) => {
-        const p = e as PointerEvent;
-        const btn = (p.target as HTMLElement).closest<HTMLElement>("[data-k]");
-        if (!btn) return;
-        p.preventDefault();
-        touches.set(p.pointerId, [btn.dataset.k as keyof Input]);
-        syncTouch();
-    });
-    addEventListener("pointermove", (e) => {
-        if (!touches.has(e.pointerId)) return;
-        touches.set(e.pointerId, keysAt(e.clientX, e.clientY));
+    document.querySelector("#touch [data-k=jump]")!.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        touches.add((e as PointerEvent).pointerId);
         syncTouch();
     });
     const end = (e: PointerEvent) => touches.delete(e.pointerId) && syncTouch();
     addEventListener("pointerup", end);
     addEventListener("pointercancel", end);
+    setupStick(document.querySelector<HTMLElement>("#t-stick")!);
+}
+
+/** The joystick fills #t-stick. It is rebuilt whenever the zone resizes (shown, rotated). */
+function setupStick(zone: HTMLElement) {
+    let pad: ReturnType<typeof nipplejs.create> | undefined;
+    const set = (keys: (keyof Input)[]) => ((stick = keys), syncTouch());
+    new ResizeObserver(() => {
+        pad?.destroy();
+        pad = undefined;
+        set([]);
+        if (!zone.clientHeight) return;
+        pad = nipplejs.create({
+            zone,
+            mode: "static",
+            position: { left: "50%", top: "50%" },
+            size: zone.clientHeight,
+            color: { front: "var(--accent)", back: "color-mix(in srgb, var(--ink) 30%, transparent)" },
+        });
+        pad.on("move", (e) => {
+            const { x, y } = e.data.vector;
+            const keys: (keyof Input)[] = [];
+            if (x < -STICK_WALK) keys.push("left");
+            if (x > STICK_WALK) keys.push("right");
+            if (y > STICK_JUMP) keys.push("jump");
+            set(keys);
+        });
+        pad.on("end", () => set([]));
+    }).observe(zone);
 }
 
 export function clearInput() {
     held.left = held.right = held.jump = false;
     touches.clear();
+    stick = [];
     syncTouch();
     jumpAt = -Infinity;
 }
