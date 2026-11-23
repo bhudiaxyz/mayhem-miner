@@ -163,6 +163,7 @@ export function detectTier(): Tier | "none" {
  * for one step down (onStep) when the average stays slower than SLOW_MS for WINDOW_S, then
  * waits a fresh window before judging again. Steps never go back up, so quality can't
  * oscillate. SLOW_MS sits below iOS Low Power Mode's 30 fps cap, which must not count as slow.
+ * Frames over 250 ms are clamped to 250, so one stall can't trigger a step on its own.
  * reset() after a pause, a hidden tab or a cavern build (shader and texture uploads hitch).
  */
 export class Governor {
@@ -179,7 +180,10 @@ export class Governor {
     }
 
     frame(ms: number) {
-        if (ms <= 0 || ms > 250) return; // a stall (tab switch, GC), not a steady rate
+        if (ms <= 0) return;
+        // Clamp, don't drop, long frames: one stall (GC, a cavern build) barely moves the average,
+        // but a device that is simply very slow (several hundred ms a frame) must still count.
+        ms = Math.min(ms, 250);
         this.sum += ms;
         this.n++;
         this.elapsed += ms / 1000;

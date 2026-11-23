@@ -313,6 +313,7 @@ Guardians keep moving in every phase, so the cavern stays alive behind dialogs. 
 - **Spikes**: two cones per `^` cell, pointing down if they hang from something and up otherwise.
 - **Crystals** (octahedra), **levers** (base, arm, glowing knob), the **portal** (four frame bars around a core plane), and one **model per guardian** (§9.3).
 - A **patrol zone** per guardian: a faint plane in its colour on the back wall over the box it sweeps, so routes can be planned at a glance.
+- **Ground-level shadows on every tier**: a soft dark blob lying flat on the first surface below the miner, each creature, every crystal and lever, the portal and each spike cell. They are read from the live tiles, so they drop when a ledge crumbles or a door opens; they shrink and fade with height, so fliers and lifts read as airborne; and they are lighter (40% vs 70%) on tiers that also have shadow maps. Moving ones are placed each frame (`placeBlob`), static ones at build.
 - The **backdrop** plane behind everything (§11).
 
 Textures are 16 × 16 greyscale pixel-art tiles painted into canvases: the ledge, crumble, belt and door tiles once at start-up (`tileTextures()`, render/paint.ts), and the rock tile per cavern in its theme's style (`rockTexture`, §11). They use nearest filtering with no mipmaps and are tinted per instance, so there are no image files. Each texture is also its material's `bumpMap`, so the grit reacts to the lamp. The two belt directions get their own clone of the belt texture so they can scroll opposite ways.
@@ -429,16 +430,24 @@ All colours live here; the only exceptions are the pre-JS splash background in `
 
 ### 12.1 Tiers (`render/tier.ts`)
 
-`classifyGpu` and `detectTier` are the sibling thrust-force project's GPU classifier, unchanged: it probes `UNMASKED_RENDERER_WEBGL` from a throwaway WebGL2 context with `powerPreference: 'high-performance'`, detects mobile by user agent (plus iPadOS via `maxTouchPoints`), and maps renderer strings to tiers. `?tier=` overrides it. A single screen of voxels is cheap, so the tiers only trade resolution, anti-aliasing, bloom, shadows and spark count:
+`detectTier()` probes `UNMASKED_RENDERER_WEBGL` from a throwaway WebGL2 context (`powerPreference: 'high-performance'`), detects mobile by user agent (plus iPadOS via `maxTouchPoints`), and `classifyGpu()` maps the renderer string to a tier. `?tier=` overrides it. Without WebGL2, boot explains why instead of failing obscurely.
 
-| Tier          | Typical hardware                                        | DPR | MSAA | Bloom | Shadows | AO  | Sparks |
-| ------------- | ------------------------------------------------------- | --- | ---- | ----- | ------- | --- | ------ |
-| `high`        | desktop discrete GPU, Apple Silicon Mac                 | 2   | 4×   | ✓     | 2048    | ✓   | 600    |
-| `mobile-high` | flagship phones and tablets, every WebGL2 iPad / iPhone | 2   | 2×   | ✓     | 1024    | –   | 400    |
-| `mid`         | modern integrated GPUs, 2019–21 phones                  | 1.5 | 2×   | ✓     | –       | –   | 400    |
-| `low`         | older Intel UHD / HD, budget phones, software GL        | 1   | –    | –     | –       | –   | 200    |
+| Tier          | Typical hardware                                                    | DPR (pixel budget) | MSAA | Bloom | Shadows           | AO  | Sparks | Frame cap |
+| ------------- | ------------------------------------------------------------------- | ------------------ | ---- | ----- | ----------------- | --- | ------ | --------- |
+| `high`        | desktop discrete GPU, Apple Silicon Mac                             | 2 (8.3 MP)         | 4×   | ✓     | 2048 soft + torch | ✓   | 600    | display   |
+| `mobile-high` | flagship phones and tablets (Galaxy S22 Ultra), every iPad / iPhone | 2 (3.7 MP)         | 2×   | ✓     | 1024 soft         | –   | 400    | 60 fps    |
+| `mid`         | modern integrated GPUs, 2019–21 phones, Intel Macs in Safari        | 1.5 (2.1 MP)       | 2×   | ✓     | –                 | –   | 400    | 60 fps    |
+| `low`         | older Intel UHD / HD, budget phones (PowerVR), software GL, ≤ 2 GB  | 1 (1.3 MP)         | –    | –     | –                 | –   | 200    | 60 fps    |
 
-Without WebGL2, boot explains why instead of failing obscurely.
+Classifier rules worth knowing: every iOS / iPadOS device reports "Apple GPU" and starts at `mobile-high`; Safari on a Mac also says "Apple GPU", so 8+ cores (Apple Silicon) is `high` and fewer (Intel) is `mid`; Adreno 7xx, Xclipse and Immortalis are `mobile-high`, Adreno 630+ and Mali-G76+ `mid`, older and PowerVR `low`; GTX 9xx / 1030–1050 / MX / GT are `mid`; 2 GB of device memory or less is always `low`. `check.ts` asserts these on real devices' strings (§16).
+
+**Device-proofing on top of the guess:**
+
+- **Pixel budget**: DPR is the tier cap, lowered further on big screens to stay under the tier's budget (an iPad Pro at DPR 2 would be 5.6 MP; it renders at ~1.6 instead).
+- **Frame cap**: non-desktop tiers render at most 60 fps, even on 90 / 120 Hz screens (S22 Ultra, iPad Pro). The game ticks at 40 Hz, so more frames would only cost heat and battery. Time owed carries over, so a 90 Hz screen still averages 60.
+- **Governor** (`Governor`, main.ts): fed the time between rendered frames during steady play, it steps quality down when the average stays slower than 38 ms (about 26 fps) for 3 s, cheapest-to-lose first: ambient occlusion, resolution (×0.8 a step down to DPR 1), bloom, then shadows (`View.degrade`). It never steps back up, so quality can't oscillate; its threshold is below iOS Low Power Mode's 30 fps cap; frames over 250 ms count as 250, so one stall cannot trigger a step but a very slow device still does; it resets on cavern changes and tab switches. Each step is logged to the console.
+- **Context loss**: mobile browsers can drop the WebGL context in the background or under memory pressure. The view calls `preventDefault` so it can be restored (three.js re-uploads lazily), skips rendering while lost, and main.ts pauses the run.
+- **8-bit fallback**: the post-processing target is half-float only where the GPU can render to it (`EXT_color_buffer_float` / `_half_float`); otherwise 8-bit, so older Android GPUs don't show a black screen.
 
 ### 12.2 Keeping frames smooth
 
@@ -455,7 +464,7 @@ Without WebGL2, boot explains why instead of failing obscurely.
 All devices feed one `Input { left, right, jump }`:
 
 - **Keyboard**: `KEYS` maps `KeyboardEvent.code`, so bindings are layout-independent: ← → / A D / O P to walk, Space / ↑ / W to jump. Mapped keys `preventDefault` (no page scrolling). A key on a focused menu button is left alone outside a run, so Space and Enter still press menu buttons. Commands (Esc pause, M mute, R restart and Q menu while paused, ↑ ↓ in menus) are handled in `main.ts`.
-- **Touch joystick** (`#t-stick`, [nipplejs](https://github.com/yoannmoinet/nipplejs) in `static` mode): a stick filling the zone's height. Tilting past 0.3 of its throw walks left or right; pushing up past 0.5 jumps, so up-left / up-right is a one-thumb diagonal jump. A `ResizeObserver` rebuilds it when the zone appears or the screen rotates (its size is `--btn`).
+- **Touch joystick** (`#t-stick`, [nipplejs](https://github.com/yoannmoinet/nipplejs) in `static` mode): a stick filling the zone's height. It moves **left and right only** (`lockX`: the knob slides horizontally); tilting past 0.3 of its throw walks. Jumping is the ▲ button's job, so hold the stick and press ▲ for a jump that way. A `ResizeObserver` rebuilds it when the zone appears or the screen rotates (its size is `--btn`).
 - **Jump button** (`#touch [data-k=jump]`): held while any finger (`pointerId`) that went down on it is still down. The controls show only during a run on coarse pointers.
 - **Gamepads** (standard mapping, polled every frame): left stick (±0.4 dead zone) or d-pad ← → to walk; A, B or d-pad ↑ to jump. Start, the d-pad, the stick (past ±0.6, as virtual buttons) and A / B also fire edge-triggered `onPadButton` events that main.ts uses to pause and to move through menus.
 - `readInput()` returns a copy of the held state OR'd with the pads. **Holding jump keeps jumping** on every landing, as in the classic genre. A **jump buffer** keeps any fresh jump press alive for 100 ms (4 ticks), so a tap just before landing still jumps. It lives in input, not `stepBody`, so the solver's movement is unchanged.

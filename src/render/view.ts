@@ -258,7 +258,7 @@ export class View {
                 map: this.blobTex,
                 transparent: true,
                 depthWrite: false,
-                opacity: this.ts.shadowMap ? 0.35 : 0.55,
+                opacity: this.ts.shadowMap ? 0.4 : 0.7,
                 color: 0x000000,
             })
         );
@@ -784,7 +784,7 @@ function patrolZone(gd: Guardian, col: THREE.Color) {
 }
 
 /** A blob shadow's quad: flat on the ground, wider than deep (x by z). */
-const BLOB_GEO = new THREE.PlaneGeometry(1, DEPTH * 0.55).rotateX(-Math.PI / 2);
+const BLOB_GEO = new THREE.PlaneGeometry(1, DEPTH * 0.85).rotateX(-Math.PI / 2);
 
 function blobTexture() {
     const c = document.createElement("canvas");

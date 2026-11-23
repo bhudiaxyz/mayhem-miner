@@ -71,6 +71,7 @@ export function animatePreviews(root: HTMLElement): () => void {
         last = now;
         t += dt;
         for (const cv of canvases) {
+            if (!cv.offsetParent) continue; // on a hidden Help page: don't spend a render on it
             const m = modelFor(cv.dataset.preview ?? "miner");
             m.group.visible = true;
             m.group.rotation.y = -0.45 + Math.sin(t * 0.6) * 0.7;

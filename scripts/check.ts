@@ -275,8 +275,13 @@ function lab(rows: string[]) {
     assert.equal(steps, 0, "smooth or 30 fps-capped frames never degrade");
     for (let i = 0; i < 200; i++) gov.frame(50); // 20 fps: a step per 3 s window
     assert.equal(steps, 3, "slow frames step down, then stop when nothing is left");
-    gov.frame(5000); // a stall (tab switch) is ignored
-    assert.equal(steps, 3);
+    // One stall among smooth frames doesn't step; a device that is very slow throughout does.
+    let s2 = 0;
+    const g2 = new Governor(() => (++s2, true));
+    for (let i = 0; i < 200; i++) g2.frame(i === 50 ? 5000 : 16.7);
+    assert.equal(s2, 0, "a single stall is not slowness");
+    for (let i = 0; i < 20; i++) g2.frame(400);
+    assert.ok(s2 >= 1, "a very slow device (400 ms frames) still steps down");
 }
 
 console.log("check: all passed");

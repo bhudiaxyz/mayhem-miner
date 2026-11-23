@@ -21,14 +21,14 @@ The game is a homage to the early-1980s single-screen platformers, chiefly Matth
 
 ## Controls
 
-| Action         | Keyboard                       | Touch             | Gamepad                |
-| -------------- | ------------------------------ | ----------------- | ---------------------- |
-| Walk           | ← → · A D · O P                | Joystick ◀ ▶      | Left stick · d-pad ← → |
-| Jump           | Space · ↑ · W (hold to repeat) | ▲, or joystick up | A · B · d-pad ↑        |
-| Pause / resume | Esc                            | ❚❚                | Start                  |
-| Sound on / off | M                              | Pause menu        | Pause menu             |
-| Restart cavern | R (while paused)               | Pause menu        | Pause menu             |
-| Menus          | Arrows · Enter · Esc           | Tap               | D-pad or stick · A · B |
+| Action         | Keyboard                       | Touch        | Gamepad                |
+| -------------- | ------------------------------ | ------------ | ---------------------- |
+| Walk           | ← → · A D · O P                | Joystick ◀ ▶ | Left stick · d-pad ← → |
+| Jump           | Space · ↑ · W (hold to repeat) | ▲            | A · B · d-pad ↑        |
+| Pause / resume | Esc                            | ❚❚           | Start                  |
+| Sound on / off | M                              | Pause menu   | Pause menu             |
+| Restart cavern | R (while paused)               | Pause menu   | Pause menu             |
+| Menus          | Arrows · Enter · Esc           | Tap          | D-pad or stick · A · B |
 
 Choose the jump direction before you take off: once you're in the air the arc is fixed.
 

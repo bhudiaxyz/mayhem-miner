@@ -15,7 +15,8 @@
  *       belt     a conveyor whose chevrons scroll
  *       spikes   a floor of spikes with pulsing red tips
  *       door     a lever that flips and a door that opens, on a loop
- *   - PROPS: the ids above, in Help order.
+ *   - PROPS: the ids above, in Help order; HAZARDS: Help's text for each (name, tag line,
+ *     description), with "from cavern N" read from the hand-built maps.
  *
  * Usage
  *   render/view.ts uses the geometry; render/preview.ts calls propModel for Help.
@@ -27,6 +28,7 @@ import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeom
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { COLORS, hdr, THEMES } from "../core/palette";
 import { rng } from "../core/random";
+import { CAVERNS } from "../world/caverns";
 import type { Character } from "./characters";
 import { rockTexture, tileTextures } from "./paint";
 
@@ -65,6 +67,49 @@ export function crumbleStripGeometry() {
 
 export const PROPS = ["crystal", "portal", "crumble", "belt", "spikes", "door"] as const;
 export type PropId = (typeof PROPS)[number];
+
+/** The first hand-built cavern (1-based) with a feature, read from the maps so it stays true. */
+const firstWith = (has: (cv: (typeof CAVERNS)[number]) => boolean) => `from cavern ${CAVERNS.findIndex(has) + 1}`;
+
+/** Help's "Obstacles & dangers": each prop's name, tag line and description, in PROPS order. */
+export const HAZARDS: { id: PropId; name: string; meta: string; blurb: string }[] = [
+    {
+        id: "crystal",
+        name: "Crystal",
+        meta: "collect every one",
+        blurb: "They flash through colours. Take them all to light the portal; each one scores 100.",
+    },
+    {
+        id: "portal",
+        name: "Portal",
+        meta: "the way out",
+        blurb: "Dark until the last crystal is taken, then it lights up and pulses. Walk in: air left over is paid as bonus points.",
+    },
+    {
+        id: "crumble",
+        name: "Crumbling ledge",
+        meta: firstWith((cv) => cv.tiles.includes("~")),
+        blurb: "Broken, gritty and dimly edged. It holds you for under a second, then sinks and falls away. Keep moving.",
+    },
+    {
+        id: "belt",
+        name: "Conveyor belt",
+        meta: firstWith((cv) => /[<>]/.test(cv.tiles)),
+        blurb: "Its chevrons scroll the way it carries you. You can't walk against it, but you can jump off it.",
+    },
+    {
+        id: "spikes",
+        name: "Spikes",
+        meta: firstWith((cv) => cv.tiles.includes("^")),
+        blurb: "Deadly to touch, on floors, ledges and ceilings, though forgiving at their very edges.",
+    },
+    {
+        id: "door",
+        name: "Sealed door & lever",
+        meta: firstWith((cv) => cv.levers.length > 0),
+        blurb: "Doors are solid until you touch the lever. One lever opens every door in the cavern.",
+    },
+];
 
 const TH = THEMES[0];
 const tint = (hex: number) => new THREE.Color(hex);

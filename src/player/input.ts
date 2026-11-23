@@ -7,7 +7,7 @@
  *
  * Operations
  *   - setupInput(): key listeners (KeyboardEvent.code, so layouts don't matter), the #t-stick
- *     nipplejs joystick (tilt to walk, push up to jump, so diagonals are one thumb) and the
+ *     nipplejs joystick (left / right only: it slides horizontally) and the
  *     #touch [data-k] jump button, tracked per finger.
  *   - readInput(): held keys and buttons OR'd with every connected gamepad (left stick or
  *     d-pad to walk; A, B or d-pad up to jump), plus a 100 ms jump buffer for early taps.
@@ -35,9 +35,8 @@ const held: Input = { left: false, right: false, jump: false };
 const touches = new Set<number>();
 /** Keys the joystick is tilted towards. */
 let stick: (keyof Input)[] = [];
-/** Joystick dead zones, as a fraction of the stick's throw. */
+/** Joystick dead zone, as a fraction of the stick's throw. */
 const STICK_WALK = 0.3;
-const STICK_JUMP = 0.5;
 const touchHeld: Input = { left: false, right: false, jump: false };
 /** A jump press is remembered this long, so a tap just before landing still jumps (4 ticks). */
 const JUMP_BUFFER_MS = 100;
@@ -63,7 +62,7 @@ const KEY_HELP = [
 ];
 const TOUCH_HELP = [
     ["Stick ◀ ▶", "Walk"],
-    ["▲ · stick up", "Jump (tilt up-left / up-right to jump that way)"],
+    ["▲", "Jump (hold the stick to jump that way)"],
     ["❚❚", "Pause"],
 ];
 export const HELP = isTouch ? TOUCH_HELP : KEY_HELP;
@@ -125,14 +124,12 @@ function setupStick(zone: HTMLElement) {
             position: { left: "50%", top: "50%" },
             size: zone.clientHeight,
             color: { front: "var(--accent)", back: "color-mix(in srgb, var(--ink) 30%, transparent)" },
+            // Left / right only: the knob slides horizontally, and jumping is the ▲ button's job.
+            lockX: true,
         });
         pad.on("move", (e) => {
-            const { x, y } = e.data.vector;
-            const keys: (keyof Input)[] = [];
-            if (x < -STICK_WALK) keys.push("left");
-            if (x > STICK_WALK) keys.push("right");
-            if (y > STICK_JUMP) keys.push("jump");
-            set(keys);
+            const { x } = e.data.vector;
+            set(x < -STICK_WALK ? ["left"] : x > STICK_WALK ? ["right"] : []);
         });
         pad.on("end", () => set([]));
     }).observe(zone);

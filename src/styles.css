@@ -726,6 +726,23 @@ dl.bindings dd {
 .cr-note {
     margin: 0 0 16px;
 }
+/* How to play pages and pager. */
+.ht-page {
+    min-height: 210px;
+}
+.ht-pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin: 6px 0 14px;
+}
+.ht-step {
+    min-width: 13em;
+    text-align: center;
+    font: 10px var(--pixel);
+    color: var(--dim);
+}
 .cavern-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

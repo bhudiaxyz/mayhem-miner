@@ -14,9 +14,9 @@
  *   - menuNav(dx, dy) / menuSelect() / menuBack(): arrows and gamepad d-pad / stick / A / B
  *     move focus spatially through the top-most menu and press the focused control.
  *   - cavernSelectBody(reached, onPick): a grid of caverns 1 .. reached + 1 with names.
- *   - HOWTO: the How to play body; carouselsHelp() / wireCarousels(): its "Who's down here"
- *     and "Obstacles & dangers" carousels, one animated preview (render/preview.ts) at a time
- *     with ◀ ▶ to step through.
+ *   - howToBody(controls) / wireHowTo(): How to play as four pages with a pager: the rules
+ *     (HOWTO), the controls, "Obstacles & dangers" and "Who's down here". The last two are
+ *     carousels: one animated preview (render/preview.ts) at a time, ◀ ▶ to step through.
  *   - showIntro(n, name, facts): the 2.4 s cavern title card.
  *
  * Highlights
@@ -28,7 +28,7 @@
  */
 import { BAND, bandName } from "../core/difficulty";
 import { CREATURES } from "../render/characters";
-import { CAVERNS } from "../world/caverns";
+import { HAZARDS } from "../render/props";
 import { cavernFor } from "../world/generate";
 
 export interface MenuItem {
@@ -195,49 +195,6 @@ const CAST: Slide[] = [
     })),
 ];
 
-/** The first hand-built cavern (1-based) with a feature, read from the maps so it stays true. */
-const firstWith = (has: (cv: (typeof CAVERNS)[number]) => boolean) => `from cavern ${CAVERNS.findIndex(has) + 1}`;
-
-/** Help's obstacles and dangers, previewed by render/props.ts. */
-const HAZARDS: Slide[] = [
-    {
-        id: "crystal",
-        name: "Crystal",
-        meta: "collect every one",
-        blurb: "They flash through colours. Take them all to light the portal; each one scores 100.",
-    },
-    {
-        id: "portal",
-        name: "Portal",
-        meta: "the way out",
-        blurb: "Dark until the last crystal is taken, then it lights up and pulses. Walk in: air left over is paid as bonus points.",
-    },
-    {
-        id: "crumble",
-        name: "Crumbling ledge",
-        meta: firstWith((cv) => cv.tiles.includes("~")),
-        blurb: "Broken, gritty and dimly edged. It holds you for under a second, then sinks and falls away. Keep moving.",
-    },
-    {
-        id: "belt",
-        name: "Conveyor belt",
-        meta: firstWith((cv) => /[<>]/.test(cv.tiles)),
-        blurb: "Its chevrons scroll the way it carries you. You can't walk against it, but you can jump off it.",
-    },
-    {
-        id: "spikes",
-        name: "Spikes",
-        meta: firstWith((cv) => cv.tiles.includes("^")),
-        blurb: "Deadly to touch, on floors, ledges and ceilings, though forgiving at their very edges.",
-    },
-    {
-        id: "door",
-        name: "Sealed door & lever",
-        meta: firstWith((cv) => cv.levers.length > 0),
-        blurb: "Doors are solid until you touch the lever. One lever opens every door in the cavern.",
-    },
-];
-
 const SETS: Record<string, Slide[]> = { cast: CAST, hazards: HAZARDS };
 
 /** One carousel: an animated preview (render/preview.ts) with ◀ ▶ to step through a set. */
@@ -253,23 +210,56 @@ function carousel(set: string, title: string, note: string) {
 <p class="cr-note">${note}</p>`;
 }
 
-/** How to play's two carousels: "Who's down here" and "Obstacles & dangers". wireCarousels() hooks them up. */
-export function carouselsHelp() {
-    return (
-        carousel(
-            "cast",
-            "Who's down here",
-            "Touching any creature costs a life, and each one's reach is about a miner's height, even the low ones. The tinted patch behind a creature shows its patrol. From cavern 41 some creatures sprint."
-        ) +
+/** How to play's four pages, in order: the rules, the controls, obstacles, creatures. */
+const PAGES = ["How to play", "Controls", "Obstacles & dangers", "Who's down here"];
+
+/**
+ * How to play as four pages, one shown at a time, with a ◀ n / 4 · title ▶ pager under each.
+ * `controls` is the device's bindings list (main.ts). wireHowTo() hooks up the pager and carousels.
+ */
+export function howToBody(controls: string) {
+    const pages = [
+        HOWTO,
+        controls,
         carousel(
             "hazards",
             "Obstacles &amp; dangers",
             "Falls longer than six blocks are fatal, measured from the top of your jump. Air drains all the time: when the torch gutters, hurry."
-        )
+        ),
+        carousel(
+            "cast",
+            "Who's down here",
+            "Touching any creature costs a life, and each one's reach is about a miner's height, even the low ones. The tinted patch behind a creature shows its patrol. From cavern 41 some creatures sprint."
+        ),
+    ];
+    return (
+        pages
+            .map((html, i) => `<section class="ht-page" data-page="${i}"${i ? " hidden" : ""}>${html}</section>`)
+            .join("") +
+        `<div class="ht-pager"><button class="cr-nav ht-prev" aria-label="Previous page">◀</button>` +
+        `<span class="ht-step" aria-live="polite"></span>` +
+        `<button class="cr-nav ht-next" aria-label="Next page">▶</button></div>`
     );
 }
 
-export function wireCarousels(root: HTMLElement) {
+export function wireHowTo(root: HTMLElement) {
+    wireCarousels(root);
+    const pages = [...root.querySelectorAll<HTMLElement>(".ht-page")];
+    const step = root.querySelector<HTMLElement>(".ht-step")!;
+    let i = 0;
+    const show = () => {
+        pages.forEach((p, k) => (p.hidden = k !== i));
+        step.textContent = `${i + 1} / ${pages.length} · ${PAGES[i]}`;
+    };
+    root.querySelector(".ht-prev")!.addEventListener(
+        "click",
+        () => ((i = (i + pages.length - 1) % pages.length), show())
+    );
+    root.querySelector(".ht-next")!.addEventListener("click", () => ((i = (i + 1) % pages.length), show()));
+    show();
+}
+
+function wireCarousels(root: HTMLElement) {
     for (const card of root.querySelectorAll<HTMLElement>(".cr-card")) {
         const slides = SETS[card.dataset.set!];
         let i = 0;
