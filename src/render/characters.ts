@@ -320,32 +320,6 @@ function torchBeam() {
 
 const EYE = COLORS.guardianEye;
 
-/**
- * The creature roster by difficulty band: each band can add a newcomer, so deeper caverns
- * meet new things. Band 1: slimes and beetles, bats, drones. Moles from cavern 11, spiders
- * (on silk, as lifts) from 21, worms from 31, moths from 41.
- */
-const ROSTER: { from: number; kind: "walk" | "fly" | "lift"; make: (c: number) => Character }[] = [
-    { from: 1, kind: "walk", make: slime },
-    { from: 1, kind: "walk", make: beetle },
-    { from: 1, kind: "fly", make: bat },
-    { from: 1, kind: "lift", make: drone },
-    { from: 2, kind: "walk", make: mole },
-    { from: 3, kind: "walk", make: robot },
-    { from: 3, kind: "lift", make: spider },
-    { from: 4, kind: "walk", make: worm },
-    { from: 5, kind: "fly", make: moth },
-];
-
-/** The model for a guardian of `kind` in cavern n: the newest creature its band allows, rotating. */
-export function guardianModel(kind: "walk" | "fly" | "lift", n: number, col: THREE.Color): Character {
-    const band = difficulty(n).band;
-    const pool = ROSTER.filter((e) => e.kind === kind && e.from <= band);
-    // Newest first, so a band's newcomer is the one most often met in that band.
-    const e = pool[pool.length - 1 - (n % pool.length)];
-    return e.make(col.getHex());
-}
-
 function robot(c: number): Character {
     const dk = shade(c, 0.6),
         grey = 0x6a6a78,
@@ -385,7 +359,7 @@ function robot(c: number): Character {
     );
     const head = part(
         [
-            [0, 0, 0, 5, 4, 5, c],
+            [0, 0, 0, 5, 4, 5, shade(c, 1.25)],
             [5, 1, 0, 1, 2, 5, black],
             [5, 2, 1, 1, 1, 3, EYE, 3],
             [2, 4, 2, 1, 2, 1, grey],
@@ -413,12 +387,13 @@ function robot(c: number): Character {
 }
 
 function beetle(c: number): Character {
-    const dk = shade(c, 0.45);
+    const dk = shade(c, 0.65),
+        leg = shade(c, 0.35);
     const body = part(
         [
             [0, 0, 0, 8, 2, 6, c],
             [1, 2, 1, 6, 1, 4, c],
-            [2, 3, 2, 4, 1, 2, c],
+            [2, 3, 2, 4, 1, 2, shade(c, 1.35)],
             [0, 0, 0, 8, 1, 6, dk],
             [8, 0, 1, 2, 2, 4, dk],
             [9, 1, 1, 1, 1, 1, EYE, 3],
@@ -436,12 +411,12 @@ function beetle(c: number): Character {
             const l = part(
                 side > 0
                     ? [
-                          [0, 2, 0, 1, 1, 2, dk],
-                          [0, 0, 2, 1, 2, 1, dk],
+                          [0, 2, 0, 1, 1, 2, leg],
+                          [0, 0, 2, 1, 2, 1, leg],
                       ]
                     : [
-                          [0, 2, -2, 1, 1, 2, dk],
-                          [0, 0, -3, 1, 2, 1, dk],
+                          [0, 2, -2, 1, 1, 2, leg],
+                          [0, 0, -3, 1, 2, 1, leg],
                       ],
                 [-0.5, -3, 0],
                 [x, 3, side * 3]
@@ -464,9 +439,9 @@ function beetle(c: number): Character {
 function slime(c: number): Character {
     const body = part(
         [
-            [0, 0, 0, 8, 2, 8, c],
+            [0, 0, 0, 8, 2, 8, shade(c, 0.7)],
             [1, 2, 1, 6, 2, 6, c],
-            [2, 4, 2, 4, 1, 4, c],
+            [2, 4, 2, 4, 1, 4, shade(c, 1.35)],
             [6, 2, 2, 1, 2, 1, 0xffffff, 2],
             [6, 2, 5, 1, 2, 1, 0xffffff, 2],
             [6, 2, 3, 1, 1, 2, shade(c, 0.4)],
@@ -488,12 +463,13 @@ function slime(c: number): Character {
 }
 
 function bat(c: number): Character {
-    const dk = shade(c, 0.5);
+    const dk = shade(c, 0.4);
     const body = part(
         [
             [0, 0, 0, 4, 4, 4, c],
-            [1, 4, 0, 1, 2, 1, dk],
-            [1, 4, 3, 1, 2, 1, dk],
+            [1, 4, 0, 1, 2, 1, shade(c, 0.75)],
+            [1, 4, 3, 1, 2, 1, shade(c, 0.75)],
+            [3, 1, 1, 1, 1, 2, shade(c, 1.35)],
             [3, 2, 0, 1, 1, 1, EYE, 3],
             [3, 2, 3, 1, 1, 1, EYE, 3],
             [3, 0, 1, 1, 1, 1, 0xffffff],
@@ -539,6 +515,7 @@ function drone(c: number): Character {
             [2, 2, 6, 2, 2, 1, EYE, 3],
             [6, 2, 2, 1, 2, 2, EYE, 3],
             [1, -1, 1, 4, 1, 4, c, 2],
+            [1, 5, 1, 4, 1, 4, shade(c, 1.3)],
             [2, 6, 2, 2, 1, 2, grey],
         ],
         [-3, 0, -3],
@@ -578,7 +555,7 @@ function mole(c: number): Character {
     const body = part(
         [
             [0, 1, 0, 8, 4, 6, c],
-            [1, 5, 1, 6, 1, 4, c],
+            [1, 5, 1, 6, 1, 4, shade(c, 1.25)],
             [1, 0, 1, 6, 1, 4, dk],
             [8, 1, 2, 2, 2, 2, snout],
             [10, 2, 2, 1, 1, 2, 0xff7a9a, 1.3],
@@ -626,7 +603,7 @@ function worm(c: number): Character {
     );
     const head = part(
         [
-            [0, 0, 0, 3, 4, 4, c],
+            [0, 0, 0, 3, 4, 4, shade(c, 1.25)],
             [2, 2, 0, 1, 1, 1, EYE, 3],
             [2, 2, 3, 1, 1, 1, EYE, 3],
             [2, 0, 1, 1, 1, 2, 0x200810],
@@ -651,12 +628,12 @@ function worm(c: number): Character {
 }
 
 function spider(c: number): Character {
-    const dk = shade(c, 0.45);
+    const dk = shade(c, 0.35);
     const body = part(
         [
             [0, 0, 0, 5, 4, 5, c],
             [1, 4, 2, 3, 1, 1, shade(c, 1.3)],
-            [5, 1, 1, 3, 3, 3, dk],
+            [5, 1, 1, 3, 3, 3, shade(c, 0.7)],
             [8, 2, 1, 1, 1, 1, EYE, 3],
             [8, 2, 3, 1, 1, 1, EYE, 3],
         ],
@@ -709,10 +686,12 @@ function spider(c: number): Character {
 
 function moth(c: number): Character {
     const dk = shade(c, 0.5),
+        wing = shade(c, 0.75),
         spot = shade(c, 1.5);
     const body = part(
         [
             [0, 0, 0, 5, 3, 3, c],
+            [4, 0, 0, 1, 3, 3, shade(c, 1.35)],
             [5, 0, 0, 2, 3, 3, dk],
             [6, 1, 0, 1, 1, 1, EYE, 3],
             [6, 1, 2, 1, 1, 1, EYE, 3],
@@ -727,8 +706,8 @@ function moth(c: number): Character {
         const z = (w: number, at: number) => (side > 0 ? at : -at - w);
         return part(
             [
-                [-2, 0, z(3, 0), 6, 1, 3, dk],
-                [-1, 0, z(2, 3), 5, 1, 2, dk],
+                [-2, 0, z(3, 0), 6, 1, 3, wing],
+                [-1, 0, z(2, 3), 5, 1, 2, wing],
                 [0, 0, z(1, 5), 3, 1, 1, dk],
                 [0, 0, z(2, 2), 2, 1, 2, spot],
             ],
@@ -750,4 +729,117 @@ function moth(c: number): Character {
             for (const w of wings) w.position.y = (y + 2) * VOX;
         },
     };
+}
+
+// ---- Roster ---------------------------------------------------------------------------------------
+
+/**
+ * The creature roster by difficulty band (also the Help page's Creatures list): each band can
+ * add a newcomer, so deeper caverns meet new things. Band 1: slimes and beetles, bats, drones.
+ * Moles from cavern 11, robots and spiders (on silk, as lifts) from 21, worms from 31, moths from 41.
+ */
+export interface Creature {
+    id: string;
+    name: string;
+    kind: "walk" | "fly" | "lift";
+    /** First band it appears in (1 = from cavern 1). */
+    from: number;
+    /** How Help describes it: what makes it distinct and what to watch for. */
+    blurb: string;
+    /** Help preview colour (in play, each cavern picks its own palette). */
+    preview: number;
+    make: (c: number) => Character;
+}
+
+export const CREATURES: Creature[] = [
+    {
+        id: "slime",
+        name: "Slime",
+        kind: "walk",
+        from: 1,
+        blurb: "Hops along its ledge, squashing and stretching. It's low, but the danger reaches a miner's height above it, so jump well clear.",
+        preview: 0x5ad06a,
+        make: slime,
+    },
+    {
+        id: "beetle",
+        name: "Beetle",
+        kind: "walk",
+        from: 1,
+        blurb: "Scuttles on six legs from one end of its ledge to the other, turning at walls, spikes and ledge ends. Cross behind it as it turns.",
+        preview: 0x3ab0b0,
+        make: beetle,
+    },
+    {
+        id: "bat",
+        name: "Bat",
+        kind: "fly",
+        from: 1,
+        blurb: "Sweeps back and forth through open air and ignores ledges; only walls turn it. Watch the air above the ledge you're jumping to.",
+        preview: 0x9a6ad0,
+        make: bat,
+    },
+    {
+        id: "drone",
+        name: "Drone",
+        kind: "lift",
+        from: 1,
+        blurb: "Rises and falls in its shaft. Wait for it to pass before you cross the column.",
+        preview: 0xe0904a,
+        make: drone,
+    },
+    {
+        id: "mole",
+        name: "Mole",
+        kind: "walk",
+        from: 2,
+        blurb: "Paddles along with big digging claws. Slow-looking, but it keeps a steady pace to the very end of its ledge.",
+        preview: 0xa07a6a,
+        make: mole,
+    },
+    {
+        id: "robot",
+        name: "Mine robot",
+        kind: "walk",
+        from: 3,
+        blurb: "A stiff-legged old mine robot with a scanning visor. Tall, so there's no ducking past it: jump over or wait.",
+        preview: 0x6a8ac0,
+        make: robot,
+    },
+    {
+        id: "spider",
+        name: "Spider",
+        kind: "lift",
+        from: 3,
+        blurb: "Drops and climbs on a silk thread. The thread is harmless, the spider isn't. Time your crossing for when it's high.",
+        preview: 0xd04a4a,
+        make: spider,
+    },
+    {
+        id: "worm",
+        name: "Worm",
+        kind: "walk",
+        from: 4,
+        blurb: "Rears up as it inches along its ledge, taller at the head than the tail. Don't let its slow crawl fool you.",
+        preview: 0xe07a8a,
+        make: worm,
+    },
+    {
+        id: "moth",
+        name: "Moth",
+        kind: "fly",
+        from: 5,
+        blurb: "Flutters through open air like a bat, but in the deep caverns where guardians are quick and some sprint.",
+        preview: 0xd0b04a,
+        make: moth,
+    },
+];
+
+/** The model for a guardian of `kind` in cavern n: the newest creature its band allows, rotating. */
+export function guardianModel(kind: "walk" | "fly" | "lift", n: number, col: THREE.Color): Character {
+    const band = difficulty(n).band;
+    const pool = CREATURES.filter((e) => e.kind === kind && e.from <= band);
+    // Newest first, so a band's newcomer is the one most often met in that band.
+    const e = pool[pool.length - 1 - (n % pool.length)];
+    return e.make(col.getHex());
 }

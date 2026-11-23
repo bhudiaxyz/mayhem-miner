@@ -660,6 +660,72 @@ dl.bindings dd {
 .howto b {
     color: var(--ink);
 }
+/* How to play: Who's down here (animated previews from render/preview.ts). */
+.cr-title {
+    font: 11px var(--pixel);
+    color: var(--accent);
+    margin: 4px 0 10px;
+}
+.cr-card {
+    display: grid;
+    grid-template-columns: auto 112px auto 1fr;
+    gap: 6px 10px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.cr-card canvas {
+    width: 112px;
+    height: 112px;
+    border-radius: 10px;
+    background: radial-gradient(circle at 50% 60%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%);
+}
+.cr-nav {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--bg) 60%, transparent);
+    color: var(--ink);
+    font-size: 12px;
+    cursor: pointer;
+}
+.cr-nav:hover,
+.cr-nav:focus-visible {
+    background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.cr-text b {
+    color: var(--ink);
+}
+.cr-count {
+    display: block;
+    margin-top: 4px;
+    font: 9px var(--pixel);
+    color: var(--dim);
+}
+/* Narrow screens: preview and buttons on one row, the text below. */
+@media (max-width: 460px) {
+    .cr-card {
+        grid-template-columns: auto 1fr auto;
+        justify-items: center;
+    }
+    .cr-text {
+        grid-column: 1 / -1;
+    }
+}
+.cr-meta {
+    margin-left: 8px;
+    font-size: 11px;
+    color: var(--accent);
+}
+.cr-text p,
+.cr-note {
+    margin: 2px 0 0;
+    font-size: 13px;
+    color: var(--dim);
+}
+.cr-note {
+    margin: 0 0 16px;
+}
 .cavern-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

@@ -628,7 +628,7 @@ function patrolZone(gd: Guardian, col: THREE.Color) {
         y1 = lift ? gd.max + 16 : gd.y + 16;
     const m = new THREE.Mesh(
         new THREE.PlaneGeometry((x1 - x0) / 8, (y1 - y0) / 8),
-        new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.14, depthWrite: false })
+        new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.07, depthWrite: false })
     );
     m.position.set((x0 + x1) / 16, H - (y0 + y1) / 16, -DEPTH / 2 - 0.01);
     return m;

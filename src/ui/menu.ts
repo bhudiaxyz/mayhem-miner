@@ -14,7 +14,8 @@
  *   - menuNav(dx, dy) / menuSelect() / menuBack(): arrows and gamepad d-pad / stick / A / B
  *     move focus spatially through the top-most menu and press the focused control.
  *   - cavernSelectBody(reached, onPick): a grid of caverns 1 .. reached + 1 with names.
- *   - HOWTO: the How to play body.
+ *   - HOWTO: the How to play body; creaturesHelp() / wireCreatures(): its "Who's down here"
+ *     carousel, one animated character (render/preview.ts) at a time with ◀ ▶ to step through.
  *   - showIntro(n, name, facts): the 2.4 s cavern title card.
  *
  * Highlights
@@ -24,7 +25,8 @@
  *
  * See also: main.ts (flow), index.html, styles.css; DESIGN.md "10. UI, menus and progress".
  */
-import { bandName } from "../core/difficulty";
+import { BAND, bandName } from "../core/difficulty";
+import { CREATURES } from "../render/characters";
 import { cavernFor } from "../world/generate";
 
 export interface MenuItem {
@@ -165,6 +167,60 @@ export const HOWTO = `
   <li><b>Don't fall too far.</b> Six blocks is the most you'll survive.</li>
   <li><b>Mind the cavern.</b> Crumbling ledges give way, conveyors carry you, spikes and guardians kill, and levers open doors.</li>
 </ol>`;
+
+const MOVES = { walk: "walks its ledge", fly: "flies", lift: "rides a shaft" };
+
+/** Help's characters, in order: Pip, then every creature in the order they arrive. */
+const CAST = [
+    {
+        id: "miner",
+        name: "Pip (you)",
+        meta: "night-shift miner",
+        blurb: "The helmet torch lights the way ahead. When it starts to gutter, your air is running low.",
+    },
+    ...CREATURES.map((c) => ({
+        id: c.id,
+        name: c.name,
+        meta: `${MOVES[c.kind]} · from cavern ${(c.from - 1) * BAND + 1}`,
+        blurb: c.blurb,
+    })),
+];
+
+/**
+ * How to play's "Who's down here": one animated preview (render/preview.ts animates the
+ * canvas) with ◀ ▶ buttons to step through the cast. wireCreatures() hooks up the buttons.
+ */
+export function creaturesHelp() {
+    return `<h3 class="cr-title">Who's down here</h3>
+<div class="cr-card">
+  <button class="cr-nav" data-step="-1" aria-label="Previous character">◀</button>
+  <canvas data-creature="miner" width="192" height="192" aria-hidden="true"></canvas>
+  <button class="cr-nav" data-step="1" aria-label="Next character">▶</button>
+  <div class="cr-text" aria-live="polite"><b></b><span class="cr-meta"></span><p></p><span class="cr-count"></span></div>
+</div>
+<p class="cr-note">Touching any creature costs a life, and each one's reach is about a miner's height, even the low ones. The tinted patch behind a creature shows its patrol. From cavern 41 some creatures sprint.</p>`;
+}
+
+export function wireCreatures(root: HTMLElement) {
+    const card = root.querySelector<HTMLElement>(".cr-card");
+    if (!card) return;
+    let i = 0;
+    const show = () => {
+        const c = CAST[i];
+        card.querySelector("canvas")!.dataset.creature = c.id;
+        card.querySelector(".cr-text b")!.textContent = c.name;
+        card.querySelector(".cr-meta")!.textContent = c.meta;
+        card.querySelector(".cr-text p")!.textContent = c.blurb;
+        card.querySelector(".cr-count")!.textContent = `${i + 1} / ${CAST.length}`;
+    };
+    card.querySelectorAll<HTMLButtonElement>(".cr-nav").forEach((b) =>
+        b.addEventListener("click", () => {
+            i = (i + Number(b.dataset.step) + CAST.length) % CAST.length;
+            show();
+        })
+    );
+    show();
+}
 
 export function showIntro(n: number, name: string, facts: string) {
     $("#intro-num").textContent =

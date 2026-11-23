@@ -36,12 +36,15 @@ import { markHelpSeen, record, save } from "./core/save";
 import { isMuted, setMusicIntensity, sfx, toggleMute, unlock } from "./fx/audio";
 import { clearInput, HELP, isTouch, pollPads, readInput, setPadHandler, setupInput } from "./player/input";
 import { detectTier, TIER_SETTINGS } from "./render/tier";
+import { animatePreviews } from "./render/preview";
 import { View } from "./render/view";
 import { drawHud, message } from "./ui/hud";
 import {
     cavernSelectBody,
     closeSheet,
+    creaturesHelp,
     hideIntro,
+    wireCreatures,
     HOWTO,
     menuBack,
     menuNav,
@@ -149,17 +152,21 @@ function cavernSelect() {
 }
 
 function howTo(then?: () => void) {
+    let stopPreviews = () => {};
     const done = () => {
+        stopPreviews();
         closeSheet();
         markHelpSeen();
         then?.();
     };
     showSheet({
         title: "How to play",
-        body: HOWTO + bindings(),
+        body: HOWTO + creaturesHelp() + bindings(),
         actions: [{ label: then ? "Start" : "Back", primary: true, action: done }],
         onBack: done,
     });
+    wireCreatures($("#sheet .sheet-body"));
+    stopPreviews = animatePreviews($("#sheet .sheet-body"));
 }
 
 function bindings() {
