@@ -148,7 +148,8 @@ export class View {
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.05;
         this.renderer.shadowMap.enabled = ts.shadowMap > 0;
-        this.renderer.shadowMap.type = ts.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+        // PCF everywhere (PCFSoftShadowMap is deprecated in this three.js); soft tiers blur it via radius.
+        this.renderer.shadowMap.type = THREE.PCFShadowMap;
         host.append(this.renderer.domElement);
         // Mobile browsers drop the GPU context under memory pressure or in the background. Calling
         // preventDefault lets it be restored (three.js re-uploads everything lazily); until then
@@ -175,6 +176,7 @@ export class View {
             c.far = 70;
             this.key.shadow.bias = -0.0005;
             this.key.shadow.normalBias = 0.03;
+            if (ts.softShadows) this.key.shadow.radius = 3;
         }
         // High tier: the helmet torch casts shadows too (ledges and creatures throw them ahead).
         if (ts.shadowMap && ts.torchShadow) {
@@ -183,6 +185,7 @@ export class View {
             this.torch.shadow.camera.near = 0.2;
             this.torch.shadow.bias = -0.002;
             this.torch.shadow.normalBias = 0.04;
+            this.torch.shadow.radius = 2;
         }
         this.scene.add(
             this.key,
@@ -435,6 +438,10 @@ export class View {
             // Legs follow distance walked, interpolated to the drawn position (not 40 Hz steps).
             const walk = m.walk - Math.abs(m.x - m.px) * (1 - a);
             const ground = m.mode === "ground";
+            // game.time restarts at 0 on every cavern load and restart: a landing remembered from
+            // before must not count (it made the squash huge: a giant, flipped miner until the
+            // next landing).
+            if (t < this.landAt) this.landAt = -Infinity;
             if (ground && !this.wasGround) this.landAt = t;
             this.wasGround = ground;
             const mode: Mode =
@@ -447,7 +454,7 @@ export class View {
                       : m.mode === "jump" && JUMP[m.t] < 0
                         ? "rise"
                         : "fall";
-            const land = Math.max(0, 1 - (t - this.landAt) / LAND_SQUASH);
+            const land = Math.min(1, Math.max(0, 1 - (t - this.landAt) / LAND_SQUASH));
             this.miner.pose({ dt, t, phase: walk * STRIDE, mode, land });
             // Low air: the lamp dims and (motion allowing) gutters.
             const f = g.air / g.cavern.air;

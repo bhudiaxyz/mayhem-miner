@@ -284,7 +284,8 @@ export function minerModel(): Miner {
         to(torso.rotation, "z", lean, k);
         to(torso.position, "y", (6 + bob) * VOX, k);
         to(head.rotation, "y", look, blend(s.dt, 4));
-        root.scale.set(1 + 0.12 * s.land, (1 - 0.22 * s.land) * stretch, 1 + 0.12 * s.land);
+        const land = Math.min(1, Math.max(0, s.land)); // 0..1 by contract; never scale wildly
+        root.scale.set(1 + 0.12 * land, (1 - 0.22 * land) * stretch, 1 + 0.12 * land);
     };
     return { group, pose, lens, aim, beam };
 }
