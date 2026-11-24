@@ -45,9 +45,10 @@ body {
     touch-action: none;
 }
 
+/* The strip and gutters are mirrored (top = bottom, left = right) so the cavern sits centred. */
 #app {
     position: fixed;
-    inset: 0 var(--side-r) var(--strip) var(--side-l);
+    inset: var(--strip) var(--side-r) var(--strip) var(--side-l);
 }
 #app canvas {
     display: block;
@@ -73,7 +74,7 @@ kbd {
 /* ---- HUD ------------------------------------------------------------------------------------ */
 #hud {
     position: fixed;
-    inset: 0 var(--side-r) var(--strip) var(--side-l);
+    inset: var(--strip) var(--side-r) var(--strip) var(--side-l);
     pointer-events: none;
     font-family: var(--pixel);
     font-size: clamp(8px, 1.4vw, 13px);
@@ -232,8 +233,12 @@ kbd {
         --btn: clamp(56px, 15vmin, 88px);
     }
     body.playing {
-        --side-l: calc(var(--btn) * 2 + 34px + env(safe-area-inset-left));
-        --side-r: calc(var(--btn) * 1.15 + 24px + env(safe-area-inset-right));
+        /* Both gutters fit the wider one (the stick zone), so the cavern stays centred. */
+        --side-l: max(
+            calc(var(--btn) * 2 + 34px + env(safe-area-inset-left)),
+            calc(var(--btn) * 1.15 + 24px + env(safe-area-inset-right))
+        );
+        --side-r: var(--side-l);
     }
     .h-bottom {
         gap: 10px;
