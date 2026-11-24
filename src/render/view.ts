@@ -351,7 +351,9 @@ export class View {
             const w = g.tiles[i] === "~" ? g.wear[i] / CRUMBLE_TICKS : 1;
             const s = w >= 1 ? 0 : 1 - 0.8 * w;
             const shake = w > 0 && w < 1 ? (Math.random() - 0.5) * 0.06 : 0;
-            this.m4.makeScale(1, s, 1).setPosition(c + 0.5 + shake, H - r - 0.16 - w * 0.25, 0);
+            // Gone: collapse to a point. A flat (1, 0, 1) slab still rasterises its top face, and its
+            // zero-length normals turn NaN on mobile GPUs, which bloom smears over the whole frame.
+            this.m4.makeScale(s ? 1 : 0, s, s ? 1 : 0).setPosition(c + 0.5 + shake, H - r - 0.16 - w * 0.25, 0);
             this.crumble.setMatrixAt(k, this.m4);
             // Its glow strip rides the top of the sinking slab and goes with it.
             this.m4
